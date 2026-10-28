@@ -2,6 +2,7 @@ import { averageColor, removeFlatBackground, trimTransparent } from '../../lib/c
 import { cutoutFromBlob, type CutoutResult } from '../../lib/cutoutBrowser';
 import type { CutReply } from './cut.worker';
 import { cleanMask, type Rect } from './mask';
+import { removeSmoothBackground } from './smooth';
 
 /*
  * The product, cut out of its photo. Studio shots on a plain background are cut instantly by
@@ -63,22 +64,40 @@ export async function cutOut(blob: Blob, onStage?: (stage: CutStage, share: numb
   }
 }
 
-/**
- * A render on pure white (what Gemini draws): the white goes by flood fill and stray bits such
- * as a watermark in a corner are dropped, so the crop hugs the product alone.
- */
-export async function cutWhite(blob: Blob): Promise<CutoutResult> {
+async function decode(blob: Blob, max = 1024): Promise<ImageData> {
   const bmp = await createImageBitmap(blob);
-  const k = Math.min(1, 1024 / Math.max(bmp.width, bmp.height));
+  const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
   const c = document.createElement('canvas');
   c.width = Math.round(bmp.width * k);
   c.height = Math.round(bmp.height * k);
   const x = c.getContext('2d', { willReadFrequently: true })!;
   x.drawImage(bmp, 0, 0, c.width, c.height);
   bmp.close();
-  const img = x.getImageData(0, 0, c.width, c.height);
-  if (!removeFlatBackground(img).removed) return cutoutFromBlob(blob, { removeBg: false });
-  return (await fromMask(img)) ?? cutoutFromBlob(blob, { removeBg: false });
+  return x.getImageData(0, 0, c.width, c.height);
+}
+
+/**
+ * A render on pure white (what Gemini draws): the white goes by flood fill and stray bits such
+ * as a watermark in a corner are dropped, so the crop hugs the product alone.
+ */
+export async function cutWhite(blob: Blob): Promise<CutoutResult> {
+  const img = await decode(blob);
+  if (!removeFlatBackground(img).removed) return keepWhole(blob);
+  return (await fromMask(img)) ?? keepWhole(blob);
+}
+
+/**
+ * A 3D model's studio render: the smoothly shaded backdrop is grown away from the edges in
+ * milliseconds; only when that leaves too little or too much does the model take over.
+ */
+export async function cutRender(blob: Blob, onStage?: (stage: CutStage, share: number) => void): Promise<CutoutResult> {
+  const img = await decode(blob);
+  const { kept } = removeSmoothBackground(img);
+  if (kept > 0.03 && kept < 0.8) {
+    const r = await fromMask(img);
+    if (r) return r;
+  }
+  return cutOut(blob, onStage);
 }
 
 /** Kept as is, background and all. */

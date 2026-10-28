@@ -929,3 +929,68 @@
 .wd-ghost.is-sure {
   color: #ff6b80;
 }
+
+/* ───────── 3D model search in the form ───────── */
+.wf-tool.is-on {
+  background: var(--text);
+  color: var(--bg);
+}
+.wf-find {
+  display: grid;
+  gap: 10px;
+  overflow: hidden;
+}
+.wf-find-row {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.wf-find-row .field {
+  flex: 1;
+  min-width: 0;
+}
+.wf-find-go {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: #fff;
+}
+.wf-find-go:disabled {
+  opacity: 0.45;
+}
+.wf-models {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.wf-model {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--fill);
+  box-shadow: inset 0 0 0 2px transparent;
+  transition: box-shadow 0.2s;
+}
+.wf-model img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.wf-model.is-on {
+  box-shadow: 0 0 0 3px var(--accent-hi);
+}
+.wf-credit {
+  text-align: center;
+}
+.wf-key-link {
+  justify-self: center;
+  padding: 4px 8px;
+  color: var(--text-3);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

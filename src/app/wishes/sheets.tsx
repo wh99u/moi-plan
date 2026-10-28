@@ -14,8 +14,9 @@ import { Segmented } from '../ui/Segmented';
 import { Sheet } from '../ui/Sheet';
 import { EASE } from '../ui/text';
 import { AiError, checkKey, DEFAULT_CATEGORIES, drawProduct, readShotAi, setGeminiKey, useGeminiKey } from './ai';
-import { cutOut, cutWhite, keepWhole } from './cutout';
-import { fetchImage, firstUrl, lookup, shopOf, type Product } from './link';
+import { cutRender, cutWhite, keepWhole } from './cutout';
+import { firstUrl, lookup, shopOf, type Product } from './link';
+import { fetchRender, searchModels, toEnglish, type Model3d } from './models3d';
 import { activeWishes, categoriesOf, dreamPlan, dueOf, looksLikeCar } from './logic';
 import { readShot, type ShotStage } from './shot';
 import { WishFace } from './WishCard';
@@ -64,11 +65,11 @@ interface Filled {
   render?: string;
 }
 
-type Stage = ShotStage | 'ai' | 'draw';
+type Stage = ShotStage | 'ai' | 'draw' | 'fetch';
 
 /**
- * The picture on the card: a 3D render Gemini draws on white (cut out instantly), or the user's
- * own photo cut out by the model. `pic`: undefined = untouched, null = removed.
+ * The picture on the card: a 3D model's render found on Sketchfab, one Gemini draws on white,
+ * or the user's own photo — each cut out. `pic`: undefined = untouched, null = removed.
  */
 function usePhoto() {
   const [pic, setPic] = useState<Pic | null | undefined>(undefined);
@@ -106,7 +107,18 @@ function usePhoto() {
 
   const process = (blob: Blob, keep: boolean) =>
     job('cut', async (n) => {
-      const r = keep ? await keepWhole(blob) : await cutOut(blob, progress(n));
+      const r = keep ? await keepWhole(blob) : await cutRender(blob, progress(n));
+      if (n === run.current) put(r);
+    });
+
+  const fromModel = (model: Model3d) =>
+    job('fetch', async (n) => {
+      const blob = await fetchRender(model);
+      if (n !== run.current) return;
+      setSource(blob);
+      setWhole(false);
+      setBusy({ stage: 'cut', share: 0 });
+      const r = await cutRender(blob, progress(n));
       if (n === run.current) put(r);
     });
 
@@ -133,10 +145,12 @@ function usePhoto() {
     /** A photo of the user's own: cut out, with «Как есть» to undo. */
     own,
     draw,
+    fromModel,
     /**
      * A product screenshot. With a Gemini key it is read for name, price, category and
      * description and the product is drawn anew; without one, an Ozon screenshot is read by OCR
-     * and its photo cut out, anything else is taken as a plain photo.
+     * for name and price (the picture then comes from the 3D search), anything else is taken as
+     * a plain photo.
      */
     async scan(file: Blob, key: string, categories: string[]): Promise<Filled | null> {
       if (key) {
@@ -145,12 +159,7 @@ function usePhoto() {
         return read;
       }
       const info = await job('read', (n) => readShot(file, progress(n)));
-      if (info?.ozon && info.photo && info.card) {
-        setSource(info.card);
-        setWhole(false);
-        put(info.photo);
-        return { title: info.title, price: info.price, shop: 'Ozon' };
-      }
+      if (info?.ozon) return { title: info.title, price: info.price, shop: 'Ozon' };
       if (info) own(file);
       return null;
     },
@@ -181,6 +190,7 @@ const BUSY: Record<Stage, string> = {
   ai: 'Разбираю скрин…',
   draw: 'Рисую 3D-картинку…',
   read: 'Читаю скриншот…',
+  fetch: 'Загружаю 3D-модель…',
   model: 'Загружаю нейросеть…',
   cut: 'Вырезаю товар…',
 };
@@ -255,16 +265,66 @@ function KeyPrompt() {
 interface ToolsProps {
   photo: Photo;
   has: boolean;
-  /** What the render should show: Gemini's description, or the name typed in. */
-  subject: string;
+  /** The product's name as typed or read. */
+  title: string;
+  /** Gemini's English description of the object, when there was one. */
+  hint: string;
   categories: string[];
   onFilled: (f: Filled) => void;
+  /** Bumped when a name arrived and the picture should be found by itself. */
+  find: number;
 }
 
-/** Screenshot, 3D picture, own photo — and the key prompt when Gemini is not set up yet. */
-function ProductTools({ photo, has, subject, categories, onFilled }: ToolsProps) {
+type FindState = 'idle' | 'looking' | 'none' | 'error';
+
+/** Screenshot, 3D model search, Gemini drawing (with a key), own photo. */
+function ProductTools({ photo, has, title, hint, categories, onFilled, find }: ToolsProps) {
   const key = useGeminiKey();
-  const drawn = has && !photo.source;
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [models, setModels] = useState<Model3d[]>([]);
+  const [state, setState] = useState<FindState>('idle');
+  const [chosen, setChosen] = useState<string | null>(null);
+  const [showKey, setShowKey] = useState(false);
+  const seq = useRef(0);
+
+  const pick = (m: Model3d) => {
+    setChosen(m.id);
+    void photo.fromModel(m);
+  };
+  const search = async (q: string, pickFirst: boolean) => {
+    const n = ++seq.current;
+    setOpen(true);
+    setState('looking');
+    try {
+      const { query: used, models: found } = await searchModels(q);
+      if (n !== seq.current) return;
+      // Show the query that actually found something, so the user can refine from there.
+      setQuery(used);
+      setModels(found);
+      setState(found.length ? 'idle' : 'none');
+      if (pickFirst && found[0]) pick(found[0]);
+    } catch {
+      if (n === seq.current) setState('error');
+    }
+  };
+  const fromTitle = async (pickFirst: boolean) => {
+    setOpen(true);
+    if (!title.trim() && !hint) return;
+    setState('looking');
+    const q = hint || (await toEnglish(title));
+    setQuery(q);
+    await search(q, pickFirst);
+  };
+
+  const auto = useRef(find);
+  useEffect(() => {
+    if (find === auto.current) return;
+    auto.current = find;
+    // The bump arrives in the same render as the name it is about.
+    void fromTitle(true);
+  }, [find]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Pickers must open straight from the tap: browsers allow them only inside a gesture.
   const scan = () => void pickImage().then((f) => f && photo.scan(f, key, categories).then((r) => r && onFilled(r)));
   return (
@@ -274,10 +334,16 @@ function ProductTools({ photo, has, subject, categories, onFilled }: ToolsProps)
           <Icon name="scan" size={17} />
           Скрин товара
         </motion.button>
-        <motion.button type="button" className="wf-tool t-caption" onClick={() => void photo.draw(subject, key)} disabled={!key || !subject.trim() || !!photo.busy} whileTap={{ scale: 0.94 }}>
-          <Icon name="sparkle" size={15} />
-          {drawn ? 'Ещё вариант' : '3D-картинка'}
+        <motion.button type="button" className={`wf-tool t-caption${open ? ' is-on' : ''}`} onClick={() => (open ? setOpen(false) : void fromTitle(false))} whileTap={{ scale: 0.94 }}>
+          <Icon name="search" size={15} />
+          Найти 3D
         </motion.button>
+        {key && (
+          <motion.button type="button" className="wf-tool t-caption" onClick={() => void photo.draw(hint || title, key)} disabled={!(hint || title).trim() || !!photo.busy} whileTap={{ scale: 0.94 }}>
+            <Icon name="sparkle" size={15} />
+            Нарисовать
+          </motion.button>
+        )}
         <motion.button type="button" className="wf-tool t-caption" onClick={() => void pickImage().then((f) => f && photo.own(f))} disabled={!!photo.busy} whileTap={{ scale: 0.94 }}>
           <Icon name="photo" size={16} />
           Своё фото
@@ -288,6 +354,63 @@ function ProductTools({ photo, has, subject, categories, onFilled }: ToolsProps)
           </motion.button>
         )}
       </div>
+
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div className="wf-find" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.35, ease: EASE }}>
+            <div className="wf-find-row">
+              <input
+                className="field t-body"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  e.preventDefault();
+                  if (query.trim()) void search(query.trim(), true);
+                }}
+                placeholder="Что искать, по-английски: soda can"
+                aria-label="Поиск 3D-модели"
+                autoCapitalize="off"
+                enterKeyHint="search"
+              />
+              <button type="button" className="wf-find-go" aria-label="Искать" disabled={!query.trim()} onClick={() => void search(query.trim(), true)}>
+                <Icon name="search" size={18} />
+              </button>
+            </div>
+            {state === 'looking' && (
+              <p className="t-caption wf-note">
+                <span className="wf-spin" />
+                Ищу 3D-модели…
+              </p>
+            )}
+            {state === 'none' && <p className="t-caption wf-note is-blocked">Ничего не нашлось — попробуйте проще: «can», «sneakers», «headphones»</p>}
+            {state === 'error' && <p className="t-caption wf-note is-blocked">Каталог 3D-моделей не ответил — попробуйте ещё раз</p>}
+            {state === 'idle' && !models.length && <p className="t-caption muted">Впишите название товара или слово по-английски</p>}
+            {models.length > 0 && (
+              <div className="wf-models">
+                {models.map((m, i) => (
+                  <motion.button
+                    key={m.id}
+                    type="button"
+                    className={`wf-model${chosen === m.id ? ' is-on' : ''}`}
+                    onClick={() => pick(m)}
+                    aria-label={m.name}
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: i * 0.03, type: 'spring', stiffness: 420, damping: 28 }}
+                    whileTap={{ scale: 0.94 }}
+                  >
+                    {/* crossOrigin: the copy cached for the grid stays readable for the cut-out. */}
+                    <img src={m.thumb} alt="" crossOrigin="anonymous" loading="lazy" draggable={false} />
+                  </motion.button>
+                ))}
+              </div>
+            )}
+            {models.length > 0 && <p className="t-caption muted wf-credit">3D-модели с Sketchfab · нажмите, чтобы взять другую</p>}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {photo.source && (
         <Segmented
           name="cut"
@@ -306,7 +429,14 @@ function ProductTools({ photo, has, subject, categories, onFilled }: ToolsProps)
           </motion.p>
         )}
       </AnimatePresence>
-      {!key && <KeyPrompt />}
+      {!key &&
+        (showKey ? (
+          <KeyPrompt />
+        ) : (
+          <button type="button" className="wf-key-link t-caption" onClick={() => setShowKey(true)}>
+            Подключить Gemini — по желанию: разбор любого скрина и рисование товара
+          </button>
+        ))}
     </>
   );
 }
@@ -418,6 +548,7 @@ function WishForm({ id }: { id?: string }) {
   const [due, setDue] = useState(buy?.due ?? '');
   const [shop, setShop] = useState(buy?.shop ?? '');
   const [render, setRender] = useState('');
+  const [find, setFind] = useState(0);
   const photo = usePhoto();
 
   const img = photo.pic === undefined ? savedImg : (photo.pic?.url ?? null);
@@ -428,10 +559,10 @@ function WishForm({ id }: { id?: string }) {
     if (p.title) setTitle((t) => t || p.title!);
     if (p.category) setCategory((c) => c || p.category!);
     if (p.price) setPrice((v) => v || show(p.price!));
-    if (img || photo.busy) return;
-    // The picture is drawn when Gemini is set up; otherwise the shop's own photo is cut out.
-    if (key && p.title) void photo.draw(p.title, key);
-    else if (!key && p.image) void fetchImage(p.image).then((b) => b && photo.own(b));
+    if (img || photo.busy || !p.title) return;
+    // With Gemini the picture is drawn; otherwise a 3D model is found for the name.
+    if (key) void photo.draw(p.title, key);
+    else setFind((n) => n + 1);
   });
 
   const filled = (f: Filled) => {
@@ -441,6 +572,8 @@ function WishForm({ id }: { id?: string }) {
     if (f.shop) setShop(f.shop);
     if (f.note) setNote(f.note);
     if (f.render) setRender(f.render);
+    // Gemini draws the picture itself; a screenshot read by OCR leaves it to the 3D search.
+    if (!f.render && f.title) setFind((n) => n + 1);
   };
 
   const today = new Date();
@@ -481,7 +614,7 @@ function WishForm({ id }: { id?: string }) {
           <CutBusy busy={photo.busy} />
         </motion.div>
       </div>
-      <ProductTools photo={photo} has={!!img} subject={render || title} categories={known} onFilled={filled} />
+      <ProductTools photo={photo} has={!!img} title={title} hint={render} categories={known} onFilled={filled} find={find} />
 
       <input className="field t-headline" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Что хочется" aria-label="Название" maxLength={80} />
       <label className="sp-amount sp-amount--sm">
@@ -530,6 +663,7 @@ function DreamForm() {
   const [saved, setSaved] = useState(show(car.saved ?? 0));
   const [date, setDate] = useState(car.date);
   const [render, setRender] = useState('');
+  const [find, setFind] = useState(0);
   const photo = usePhoto();
 
   const img = photo.pic === undefined ? savedImg : (photo.pic?.url ?? null);
@@ -538,15 +672,16 @@ function DreamForm() {
   const state = useLookup(url, (p) => {
     if (p.title) setName(p.title);
     if (p.price) setPrice(show(p.price));
-    if (img || photo.busy) return;
-    if (key && p.title) void photo.draw(p.title, key);
-    else if (!key && p.image) void fetchImage(p.image).then((b) => b && photo.own(b));
+    if (img || photo.busy || !p.title) return;
+    if (key) void photo.draw(p.title, key);
+    else setFind((n) => n + 1);
   });
 
   const filled = (f: Filled) => {
     if (f.title) setName(f.title);
     if (f.price) setPrice(show(f.price));
     if (f.render) setRender(f.render);
+    if (!f.render && f.title) setFind((n) => n + 1);
   };
 
   const save = async (e: FormEvent) => {
@@ -571,7 +706,7 @@ function DreamForm() {
         )}
         <CutBusy busy={photo.busy} />
       </div>
-      <ProductTools photo={photo} has={!!img} subject={render || name} categories={[]} onFilled={filled} />
+      <ProductTools photo={photo} has={!!img} title={name} hint={render} categories={[]} onFilled={filled} find={find} />
 
       <input className="field t-headline" value={name} onChange={(e) => setName(e.target.value)} placeholder="Например, Porsche Panamera" aria-label="Мечта" maxLength={60} />
       <LinkField value={url} onChange={setUrl} state={state} />
