@@ -29,6 +29,14 @@ export function addMonths(ym: string, n: number) {
   return ymKey(new Date(y, m - 1 + n, 1));
 }
 
+/** Same day `n` months later; the 31st becomes the month's last day when it is shorter. */
+export function addMonthsKeepDay(key: string, n: number) {
+  const [y, m, d] = key.split('-').map(Number);
+  const first = new Date(y, m - 1 + n, 1);
+  const last = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+  return dayKey(new Date(first.getFullYear(), first.getMonth(), Math.min(d, last)));
+}
+
 export function daysInMonth(ym: string) {
   const [y, m] = parseYm(ym);
   return new Date(y, m, 0).getDate();

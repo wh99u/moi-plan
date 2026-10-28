@@ -1,10 +1,10 @@
-import { dayKey } from './dates';
+import { addMonthsKeepDay, dayKey } from './dates';
 import { emptyState } from './defaults';
 import { uid } from './ids';
 import { migrateV3 } from './migrate';
 import { visible } from './records';
 import { templateCategories } from './template';
-import type { Bank, BankCode, BudgetMonth, Buy, Car, Category, Income, Rec, Settings, Shift, Spend, StateV4, Task } from './types';
+import type { Bank, BankCode, BudgetMonth, Buy, Car, Category, Income, Rec, Settings, Shift, Spend, StateV4, Sub, Task } from './types';
 
 export { visible };
 
@@ -31,7 +31,11 @@ function load(storage: Storage, key: string, opts: StoreOptions, now: number): {
   if (own) {
     try {
       const parsed = JSON.parse(own) as StateV4;
-      if (parsed && parsed.v === 4) return { state: parsed, error: false };
+      if (parsed && parsed.v === 4) {
+        // Lists added after v4 shipped start empty in older saves.
+        parsed.shared.subs ??= [];
+        return { state: parsed, error: false };
+      }
     } catch {
       /* fall through to legacy / empty */
     }
@@ -190,8 +194,32 @@ export function createStore(storage: Storage, key: string, opts: StoreOptions = 
       shared({ spends: [...state.shared.spends, spend] });
       return spend;
     },
+    updateSpend(id: string, patch: Partial<Omit<Spend, 'id' | 'updatedAt'>>) {
+      shared({ spends: patchIn(state.shared.spends, id, patch) });
+    },
     deleteSpend(id: string) {
       shared({ spends: removeIn(state.shared.spends, id) });
+    },
+    addSub(x: Omit<Sub, 'id' | 'updatedAt'>): Sub {
+      const sub = stamp({ ...x, id: uid() });
+      shared({ subs: [...state.shared.subs, sub] });
+      return sub;
+    },
+    updateSub(id: string, patch: Partial<Omit<Sub, 'id' | 'updatedAt'>>) {
+      shared({ subs: patchIn(state.shared.subs, id, patch) });
+    },
+    deleteSub(id: string) {
+      shared({ subs: removeIn(state.shared.subs, id) });
+    },
+    /** Records the payment as a spend in `catId` and moves the reminder to the next period. */
+    paySub(id: string, catId: string): Spend | null {
+      const sub = visible(state.shared.subs).find((x) => x.id === id);
+      if (!sub) return null;
+      const date = dayKey(today());
+      const spend: Spend = stamp({ id: uid(), ym: date.slice(0, 7), catId, amount: sub.amount, date, title: sub.name, subId: sub.id });
+      const next = addMonthsKeepDay(sub.next, sub.period === 'year' ? 12 : 1);
+      shared({ spends: [...state.shared.spends, spend], subs: patchIn(state.shared.subs, id, { next }) });
+      return spend;
     },
     addShift(s: Omit<Shift, 'id' | 'updatedAt'>): Shift {
       const shift = stamp({ ...s, id: uid() });

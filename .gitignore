@@ -9,3 +9,8 @@ docs/references/
 # локальные настройки и скиллы Claude Code
 .claude/
 .superpowers/
+
+.playwright-mcp/
+
+# сборочный кеш TypeScript
+tsconfig.tsbuildinfo

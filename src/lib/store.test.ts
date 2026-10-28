@@ -195,3 +195,37 @@ describe('persistence', () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('subscriptions', () => {
+  test('older v4 saves load with an empty list', () => {
+    const old = fresh().get();
+    const { subs: _gone, ...shared } = old.shared;
+    localStorage.setItem(KEY, JSON.stringify({ ...old, shared }));
+    expect(fresh().get().shared.subs).toEqual([]);
+  });
+
+  test('paying records a spend and moves the reminder a period on', () => {
+    const store = fresh();
+    const sub = store.actions.addSub({ name: 'Интернет', amount: 650, icon: 'wifi', next: '2026-10-15', period: 'month', catName: 'Связь' });
+    const spend = store.actions.paySub(sub.id, 'cat1')!;
+    expect(spend).toMatchObject({ ym: '2026-10', catId: 'cat1', amount: 650, date: '2026-10-17', title: 'Интернет', subId: sub.id });
+    expect(store.get().shared.subs[0].next).toBe('2026-11-15');
+    expect(visible(store.get().shared.spends)).toHaveLength(1);
+  });
+
+  test('yearly subscriptions move a year', () => {
+    const store = fresh();
+    const sub = store.actions.addSub({ name: 'Яндекс Плюс', amount: 2990, icon: 'sparkle', next: '2026-10-20', period: 'year', catName: 'Развлечения' });
+    store.actions.paySub(sub.id, 'c');
+    expect(store.get().shared.subs[0].next).toBe('2027-10-20');
+  });
+});
+
+describe('spend items', () => {
+  test('a spend keeps its receipt lines and can be edited', () => {
+    const store = fresh();
+    const s = store.actions.addSpend({ ym: '2026-10', catId: 'c', amount: 150, date: '2026-10-17', title: 'Магазин', items: [{ name: 'Хлеб', price: 50 }, { name: 'Молоко', price: 100 }] });
+    store.actions.updateSpend(s.id, { amount: 200, items: [{ name: 'Хлеб', price: 100 }, { name: 'Молоко', price: 100 }] });
+    expect(store.get().shared.spends[0]).toMatchObject({ title: 'Магазин', amount: 200, items: [{ name: 'Хлеб', price: 100 }, { name: 'Молоко', price: 100 }] });
+  });
+});
