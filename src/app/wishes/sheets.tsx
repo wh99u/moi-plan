@@ -185,7 +185,21 @@ const BUSY: Record<Stage, string> = {
   cut: 'Вырезаю товар…',
 };
 
+/** Seconds since the current stage began, so a long wait reads as progress, not a freeze. */
+function useElapsed(stage: Stage | undefined) {
+  const [s, setS] = useState(0);
+  useEffect(() => {
+    setS(0);
+    if (!stage) return;
+    const started = Date.now();
+    const t = setInterval(() => setS(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [stage]);
+  return s;
+}
+
 function CutBusy({ busy }: { busy: Photo['busy'] }) {
+  const s = useElapsed(busy?.stage);
   return (
     <AnimatePresence>
       {busy && (
@@ -193,6 +207,7 @@ function CutBusy({ busy }: { busy: Photo['busy'] }) {
           <span className="wf-busy-sweep" />
           <span className="wf-busy-text t-caption">
             {busy.stage === 'model' && busy.share < 1 ? `Загружаю нейросеть · ${Math.round(busy.share * 100)}%` : BUSY[busy.stage]}
+            {s >= 3 && <span className="t-num"> {s} с</span>}
           </span>
         </motion.div>
       )}

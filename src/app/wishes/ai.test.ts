@@ -65,6 +65,32 @@ describe('talking to Gemini', () => {
     await expect(readShotAi(new Blob(['x'], { type: 'image/png' }), 'K', [])).rejects.toThrow(/VPN/);
   });
 
+  test('a request that hangs (a stalled VPN) ends with a message instead of spinning forever', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init: RequestInit) => new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))),
+    );
+    const read = readShotAi(new Blob(['x'], { type: 'image/png' }), 'K', []);
+    const check = expect(read).rejects.toThrow(/долго не отвечает/);
+    await vi.advanceTimersByTimeAsync(46_000);
+    await check;
+    vi.useRealTimers();
+  });
+
+  test('reading asks the flash model not to think: it only slows the answer down', async () => {
+    const bodies: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        bodies.push(String(init.body));
+        return ok([{ text: '{"title":"Кока-кола","category":"Еда и напитки","render":"a plain red can"}' }]);
+      }),
+    );
+    await readShotAi(new Blob(['x'], { type: 'image/png' }), 'K', []);
+    expect(JSON.parse(bodies[0]).generationConfig).toMatchObject({ responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 } });
+  });
+
   test('a screenshot read end to end', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ok([{ text: '{"title":"Кока-кола","price":89,"category":"Еда и напитки","render":"a plain red can"}' }])));
     await expect(readShotAi(new Blob(['x'], { type: 'image/png' }), 'K', ['Еда и напитки'])).resolves.toMatchObject({ title: 'Кока-кола', price: 89 });

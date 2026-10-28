@@ -9,9 +9,23 @@ import { useSyncExternalStore } from 'react';
 
 const KEY = 'gemini_key_v1';
 const API = 'https://generativelanguage.googleapis.com/v1beta/models';
+
+interface Model {
+  name: string;
+  /** Generation settings only this model understands. */
+  config?: object;
+}
 /** Tried in order: model names move between releases. */
-const TEXT_MODELS = ['gemini-2.5-flash', 'gemini-flash-latest'];
-const IMAGE_MODELS = ['gemini-2.5-flash-image', 'gemini-3.1-flash-image-preview'];
+const TEXT_MODELS: Model[] = [
+  // Thinking off: reading a price off a screenshot needs no deliberation, and it costs 10–30 s.
+  { name: 'gemini-2.5-flash', config: { thinkingConfig: { thinkingBudget: 0 } } },
+  { name: 'gemini-flash-latest' },
+];
+const IMAGE_MODELS: Model[] = [{ name: 'gemini-2.5-flash-image' }, { name: 'gemini-3.1-flash-image-preview' }];
+/** A stalled VPN must end in a message, not an endless spinner. */
+const READ_TIMEOUT = 45_000;
+const DRAW_TIMEOUT = 100_000;
+const CHECK_TIMEOUT = 20_000;
 
 const listeners = new Set<() => void>();
 const read = () => {
@@ -57,18 +71,36 @@ interface Part {
   inlineData?: { mimeType: string; data: string };
 }
 
-async function generate(models: string[], body: object, key: string, signal?: AbortSignal): Promise<Part[]> {
+interface Request {
+  contents: object[];
+  generationConfig?: object;
+}
+
+async function generate(models: Model[], body: Request, key: string, timeout: number, signal?: AbortSignal): Promise<Part[]> {
   let last = new AiError('Не получилось обратиться к Gemini');
   for (const model of models) {
-    const res = await fetch(`${API}/${model}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify(body),
-      signal,
-    }).catch(() => {
+    const stop = new AbortController();
+    let late = false;
+    const timer = setTimeout(() => ((late = true), stop.abort()), timeout);
+    const abort = () => stop.abort();
+    signal?.addEventListener('abort', abort);
+    let res: Response;
+    let json: { candidates?: { content?: { parts?: Part[] } }[]; error?: { message?: string } };
+    try {
+      res = await fetch(`${API}/${model.name}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({ ...body, generationConfig: { ...body.generationConfig, ...model.config } }),
+        signal: stop.signal,
+      });
+      json = await res.json().catch(() => ({}));
+    } catch {
+      if (late) throw new AiError('Gemini долго не отвечает — проверьте VPN и попробуйте ещё раз');
       throw new AiError('Нет связи с Gemini — проверьте интернет или VPN');
-    });
-    const json = await res.json().catch(() => ({}));
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+    }
     if (res.ok) return json.candidates?.[0]?.content?.parts ?? [];
     const message: string = json.error?.message ?? '';
     last = new AiError(explain(res.status, message));
@@ -76,6 +108,22 @@ async function generate(models: string[], body: object, key: string, signal?: Ab
     if (res.status !== 404) throw last;
   }
   throw last;
+}
+
+/** Screenshots are 3–6 MB of PNG; 1600 px of JPEG reads just as well and uploads in a blink. */
+export async function shrink(blob: Blob, max = 1600): Promise<Blob> {
+  try {
+    const bmp = await createImageBitmap(blob);
+    const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * k);
+    c.height = Math.round(bmp.height * k);
+    c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close();
+    return (await new Promise<Blob | null>((res) => c.toBlob(res, 'image/jpeg', 0.85))) ?? blob;
+  } catch {
+    return blob;
+  }
 }
 
 const toBase64 = (blob: Blob) =>
@@ -147,13 +195,15 @@ export function parseShotRead(text: string): ShotRead | null {
 }
 
 export async function readShotAi(image: Blob, key: string, categories: string[], signal?: AbortSignal): Promise<ShotRead> {
+  const small = await shrink(image);
   const parts = await generate(
     TEXT_MODELS,
     {
-      contents: [{ parts: [{ inlineData: { mimeType: image.type || 'image/png', data: await toBase64(image) } }, { text: shotPrompt(categories) }] }],
+      contents: [{ parts: [{ inlineData: { mimeType: small.type || 'image/png', data: await toBase64(small) } }, { text: shotPrompt(categories) }] }],
       generationConfig: { responseMimeType: 'application/json', responseSchema: SHOT_SCHEMA, temperature: 0.2 },
     },
     key,
+    READ_TIMEOUT,
     signal,
   );
   const read = parseShotRead(parts.map((p) => p.text ?? '').join(''));
@@ -170,6 +220,7 @@ export async function drawProduct(subject: string, key: string, signal?: AbortSi
     IMAGE_MODELS,
     { contents: [{ parts: [{ text: renderPrompt(subject) }] }], generationConfig: { responseModalities: ['IMAGE'] } },
     key,
+    DRAW_TIMEOUT,
     signal,
   );
   const img = parts.find((p) => p.inlineData)?.inlineData;
@@ -180,5 +231,5 @@ export async function drawProduct(subject: string, key: string, signal?: AbortSi
 
 /** A tiny request that proves the key works from here (and that the country is served). */
 export async function checkKey(key: string): Promise<void> {
-  await generate(TEXT_MODELS, { contents: [{ parts: [{ text: 'Ответь одним словом: ок' }] }], generationConfig: { maxOutputTokens: 5 } }, key);
+  await generate(TEXT_MODELS, { contents: [{ parts: [{ text: 'Ответь одним словом: ок' }] }], generationConfig: { maxOutputTokens: 5 } }, key, CHECK_TIMEOUT);
 }
