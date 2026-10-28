@@ -1,4 +1,4 @@
-import { averageColor, removeFlatBackground, trimTransparent } from '../../lib/cutout';
+import { averageColor, trimTransparent } from '../../lib/cutout';
 import { cutoutFromBlob, type CutoutResult } from '../../lib/cutoutBrowser';
 import type { CutReply } from './cut.worker';
 import { cleanMask, type Rect } from './mask';
@@ -74,16 +74,6 @@ async function decode(blob: Blob, max = 1024): Promise<ImageData> {
   x.drawImage(bmp, 0, 0, c.width, c.height);
   bmp.close();
   return x.getImageData(0, 0, c.width, c.height);
-}
-
-/**
- * A render on pure white (what Gemini draws): the white goes by flood fill and stray bits such
- * as a watermark in a corner are dropped, so the crop hugs the product alone.
- */
-export async function cutWhite(blob: Blob): Promise<CutoutResult> {
-  const img = await decode(blob);
-  if (!removeFlatBackground(img).removed) return keepWhole(blob);
-  return (await fromMask(img)) ?? keepWhole(blob);
 }
 
 /**

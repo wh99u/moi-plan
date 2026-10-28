@@ -6,7 +6,6 @@ import { Icon } from '../ui/Icon';
 import { GOOGLE_CLIENT_ID, renderGoogleButton } from './google';
 import { setProfile, useProfile } from './profile';
 import { MoneySheets } from './money/sheets';
-import { setGeminiKey, useGeminiKey } from './wishes/ai';
 import { WishesSheets } from './wishes/sheets';
 import { EXTRAS, navigate } from './route';
 import { closeSheet, useSheet } from './sheet';
@@ -120,8 +119,6 @@ function ProfileForm() {
   const { name, via } = useProfile();
   const { pref } = useTheme();
   const [draft, setDraft] = useState(name);
-  const aiKey = useGeminiKey();
-  const [keyDraft, setKeyDraft] = useState('');
   const slot = useRef<HTMLDivElement>(null);
   const showGoogle = !!GOOGLE_CLIENT_ID && via !== 'google';
 
@@ -135,7 +132,6 @@ function ProfileForm() {
   const save = (e: FormEvent) => {
     e.preventDefault();
     setProfile({ name: draft.trim(), via: 'manual', picture: undefined });
-    if (keyDraft.trim()) setGeminiKey(keyDraft.trim());
     closeSheet();
   };
 
@@ -170,23 +166,6 @@ function ProfileForm() {
         ]}
         name="theme"
       />
-      <label className="t-label card-label" htmlFor="profile-ai">
-        Ключ Gemini
-      </label>
-      <input
-        id="profile-ai"
-        className="field t-body"
-        type="password"
-        value={keyDraft}
-        onChange={(e) => setKeyDraft(e.target.value)}
-        placeholder={aiKey ? 'Сохранён · новый заменит его' : 'Для скринов товаров и 3D-картинок'}
-        autoComplete="off"
-      />
-      {aiKey && (
-        <button type="button" className="ghost-btn" onClick={() => setGeminiKey('')}>
-          Удалить ключ с этого устройства
-        </button>
-      )}
       <motion.button type="submit" className="primary-btn" whileTap={{ scale: 0.96 }}>
         Сохранить
       </motion.button>

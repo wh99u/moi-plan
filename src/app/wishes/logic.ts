@@ -55,6 +55,9 @@ export function categoriesOf(list: Buy[]): string[] {
   return [...count].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([c]) => c);
 }
 
+/** Offered as chips next to the user's own categories. */
+export const DEFAULT_CATEGORIES = ['Одежда', 'Обувь', 'Техника', 'Дом', 'Красота', 'Здоровье', 'Еда и напитки', 'Спорт', 'Хобби', 'Авто', 'Подарки'];
+
 export const wishesTotal = (list: Buy[]) => list.reduce((t, b) => t + (b.price || 0), 0);
 
 export interface DreamPlan {

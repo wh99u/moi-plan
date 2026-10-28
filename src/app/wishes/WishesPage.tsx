@@ -16,6 +16,13 @@ import './wishes.css';
 
 const SPRING = { type: 'spring', stiffness: 420, damping: 34 } as const;
 
+// Gemini was taken out (2026-10); a key saved for it on this device should not linger.
+try {
+  localStorage.removeItem('gemini_key_v1');
+} catch {
+  /* storage blocked: nothing was saved either */
+}
+
 export function WishesPage() {
   const buys = useStore((s) => s.shared.buys);
   const active = useMemo(() => activeWishes(buys), [buys]);

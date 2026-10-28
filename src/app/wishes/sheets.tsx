@@ -13,12 +13,11 @@ import { closeSheet, useSheet, useSheetData } from '../sheet';
 import { Segmented } from '../ui/Segmented';
 import { Sheet } from '../ui/Sheet';
 import { EASE } from '../ui/text';
-import { AiError, checkKey, DEFAULT_CATEGORIES, drawProduct, readShotAi, setGeminiKey, useGeminiKey } from './ai';
-import { cutRender, cutWhite, keepWhole } from './cutout';
+import { cutRender, keepWhole, type CutStage } from './cutout';
 import { firstUrl, lookup, shopOf, type Product } from './link';
 import { fetchRender, searchModels, toEnglish, type Model3d } from './models3d';
-import { activeWishes, categoriesOf, dreamPlan, dueOf, looksLikeCar } from './logic';
-import { readShot, type ShotStage } from './shot';
+import { activeWishes, categoriesOf, DEFAULT_CATEGORIES, dreamPlan, dueOf, looksLikeCar } from './logic';
+import { readShot, warmOcr, type ShotStage } from './shot';
 import { WishFace } from './WishCard';
 import { WishDetail } from './WishDetail';
 
@@ -60,16 +59,13 @@ interface Filled {
   price?: number;
   category?: string;
   shop?: string;
-  note?: string;
-  /** What to draw, in English, without brands. */
-  render?: string;
 }
 
-type Stage = ShotStage | 'ai' | 'draw' | 'fetch';
+type Stage = ShotStage | CutStage | 'fetch';
 
 /**
- * The picture on the card: a 3D model's render found on Sketchfab, one Gemini draws on white,
- * or the user's own photo — each cut out. `pic`: undefined = untouched, null = removed.
+ * The picture on the card: a 3D model's render found on Sketchfab, or the user's own photo —
+ * each cut out. `pic`: undefined = untouched, null = removed.
  */
 function usePhoto() {
   const [pic, setPic] = useState<Pic | null | undefined>(undefined);
@@ -96,8 +92,8 @@ function usePhoto() {
     try {
       const r = await work(n);
       return n === run.current ? r : null;
-    } catch (e) {
-      if (n === run.current) setError(e instanceof AiError ? e.message : 'Не получилось — попробуйте ещё раз');
+    } catch {
+      if (n === run.current) setError('Не получилось — попробуйте ещё раз');
       return null;
     } finally {
       if (n === run.current) setBusy(null);
@@ -128,14 +124,6 @@ function usePhoto() {
     void process(blob, false);
   };
 
-  const draw = (subject: string, key: string) =>
-    job('draw', async (n) => {
-      const r = await cutWhite(await drawProduct(subject, key));
-      if (n !== run.current) return;
-      setSource(null);
-      put(r);
-    });
-
   return {
     pic,
     source,
@@ -144,20 +132,12 @@ function usePhoto() {
     error,
     /** A photo of the user's own: cut out, with «Как есть» to undo. */
     own,
-    draw,
     fromModel,
     /**
-     * A product screenshot. With a Gemini key it is read for name, price, category and
-     * description and the product is drawn anew; without one, an Ozon screenshot is read by OCR
-     * for name and price (the picture then comes from the 3D search), anything else is taken as
-     * a plain photo.
+     * A product screenshot: an Ozon one is read for name and price (the picture then comes from
+     * the 3D search), anything else is taken as a plain photo.
      */
-    async scan(file: Blob, key: string, categories: string[]): Promise<Filled | null> {
-      if (key) {
-        const read = await job('ai', () => readShotAi(file, key, categories));
-        if (read) void draw(read.render, key);
-        return read;
-      }
+    async scan(file: Blob): Promise<Filled | null> {
       const info = await job('read', (n) => readShot(file, progress(n)));
       if (info?.ozon) return { title: info.title, price: info.price, shop: 'Ozon' };
       if (info) own(file);
@@ -187,8 +167,6 @@ async function storePhoto(oldId: string | undefined, pic: Pic | null | undefined
 }
 
 const BUSY: Record<Stage, string> = {
-  ai: 'Разбираю скрин…',
-  draw: 'Рисую 3D-картинку…',
   read: 'Читаю скриншот…',
   fetch: 'Загружаю 3D-модель…',
   model: 'Загружаю нейросеть…',
@@ -225,51 +203,11 @@ function CutBusy({ busy }: { busy: Photo['busy'] }) {
   );
 }
 
-/** Asks for the Gemini key right where it is needed. */
-function KeyPrompt() {
-  const [draft, setDraft] = useState('');
-  const [state, setState] = useState<'idle' | 'checking' | string>('idle');
-  const save = async () => {
-    const key = draft.trim();
-    if (!key) return;
-    setState('checking');
-    try {
-      await checkKey(key);
-      setGeminiKey(key);
-    } catch (e) {
-      // Saved anyway: «no VPN right now» is no reason to type the key again later.
-      setGeminiKey(key);
-      setState(e instanceof AiError ? e.message : 'Не получилось проверить ключ');
-    }
-  };
-  return (
-    <div className="wf-key">
-      <p className="t-caption">
-        Чтобы скрин разбирался сам, а товар рисовался 3D-картинкой, нужен бесплатный ключ Gemini с{' '}
-        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">
-          aistudio.google.com
-        </a>
-        . Он хранится только на этом устройстве.
-      </p>
-      <div className="wf-key-row">
-        <input className="field t-body" type="password" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Ключ Gemini" aria-label="Ключ Gemini" autoComplete="off" />
-        <button type="button" className="wf-key-save t-caption" disabled={!draft.trim() || state === 'checking'} onClick={() => void save()}>
-          {state === 'checking' ? 'Проверяю…' : 'Сохранить'}
-        </button>
-      </div>
-      {state !== 'idle' && state !== 'checking' && <p className="t-caption wf-note is-blocked">{state}</p>}
-    </div>
-  );
-}
-
 interface ToolsProps {
   photo: Photo;
   has: boolean;
   /** The product's name as typed or read. */
   title: string;
-  /** Gemini's English description of the object, when there was one. */
-  hint: string;
-  categories: string[];
   onFilled: (f: Filled) => void;
   /** Bumped when a name arrived and the picture should be found by itself. */
   find: number;
@@ -277,16 +215,17 @@ interface ToolsProps {
 
 type FindState = 'idle' | 'looking' | 'none' | 'error';
 
-/** Screenshot, 3D model search, Gemini drawing (with a key), own photo. */
-function ProductTools({ photo, has, title, hint, categories, onFilled, find }: ToolsProps) {
-  const key = useGeminiKey();
+/** Screenshot, 3D model search, own photo. */
+function ProductTools({ photo, has, title, onFilled, find }: ToolsProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [models, setModels] = useState<Model3d[]>([]);
   const [state, setState] = useState<FindState>('idle');
   const [chosen, setChosen] = useState<string | null>(null);
-  const [showKey, setShowKey] = useState(false);
   const seq = useRef(0);
+
+  // Reading screenshots needs the OCR loaded; starting it with the form hides that wait.
+  useEffect(() => void warmOcr().catch(() => {}), []);
 
   const pick = (m: Model3d) => {
     setChosen(m.id);
@@ -310,9 +249,9 @@ function ProductTools({ photo, has, title, hint, categories, onFilled, find }: T
   };
   const fromTitle = async (pickFirst: boolean) => {
     setOpen(true);
-    if (!title.trim() && !hint) return;
+    if (!title.trim()) return;
     setState('looking');
-    const q = hint || (await toEnglish(title));
+    const q = await toEnglish(title);
     setQuery(q);
     await search(q, pickFirst);
   };
@@ -326,7 +265,7 @@ function ProductTools({ photo, has, title, hint, categories, onFilled, find }: T
   }, [find]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pickers must open straight from the tap: browsers allow them only inside a gesture.
-  const scan = () => void pickImage().then((f) => f && photo.scan(f, key, categories).then((r) => r && onFilled(r)));
+  const scan = () => void pickImage().then((f) => f && photo.scan(f).then((r) => r && onFilled(r)));
   return (
     <>
       <div className="wf-tools">
@@ -338,12 +277,6 @@ function ProductTools({ photo, has, title, hint, categories, onFilled, find }: T
           <Icon name="search" size={15} />
           Найти 3D
         </motion.button>
-        {key && (
-          <motion.button type="button" className="wf-tool t-caption" onClick={() => void photo.draw(hint || title, key)} disabled={!(hint || title).trim() || !!photo.busy} whileTap={{ scale: 0.94 }}>
-            <Icon name="sparkle" size={15} />
-            Нарисовать
-          </motion.button>
-        )}
         <motion.button type="button" className="wf-tool t-caption" onClick={() => void pickImage().then((f) => f && photo.own(f))} disabled={!!photo.busy} whileTap={{ scale: 0.94 }}>
           <Icon name="photo" size={16} />
           Своё фото
@@ -429,14 +362,6 @@ function ProductTools({ photo, has, title, hint, categories, onFilled, find }: T
           </motion.p>
         )}
       </AnimatePresence>
-      {!key &&
-        (showKey ? (
-          <KeyPrompt />
-        ) : (
-          <button type="button" className="wf-key-link t-caption" onClick={() => setShowKey(true)}>
-            Подключить Gemini — по желанию: разбор любого скрина и рисование товара
-          </button>
-        ))}
     </>
   );
 }
@@ -537,7 +462,6 @@ function WishForm({ id }: { id?: string }) {
   const buy = useStore((s) => s.shared.buys.find((b) => b.id === id));
   const buys = useStore((s) => s.shared.buys);
   const savedImg = useImage(buy?.imgId);
-  const key = useGeminiKey();
   const known = useMemo(() => categoriesOf(activeWishes(buys)), [buys]);
 
   const [url, setUrl] = useState(buy?.url ?? '');
@@ -547,7 +471,6 @@ function WishForm({ id }: { id?: string }) {
   const [price, setPrice] = useState(show(buy?.price ?? 0));
   const [due, setDue] = useState(buy?.due ?? '');
   const [shop, setShop] = useState(buy?.shop ?? '');
-  const [render, setRender] = useState('');
   const [find, setFind] = useState(0);
   const photo = usePhoto();
 
@@ -559,10 +482,8 @@ function WishForm({ id }: { id?: string }) {
     if (p.title) setTitle((t) => t || p.title!);
     if (p.category) setCategory((c) => c || p.category!);
     if (p.price) setPrice((v) => v || show(p.price!));
-    if (img || photo.busy || !p.title) return;
-    // With Gemini the picture is drawn; otherwise a 3D model is found for the name.
-    if (key) void photo.draw(p.title, key);
-    else setFind((n) => n + 1);
+    // The picture is a 3D model found for the name.
+    if (!img && !photo.busy && p.title) setFind((n) => n + 1);
   });
 
   const filled = (f: Filled) => {
@@ -570,10 +491,7 @@ function WishForm({ id }: { id?: string }) {
     if (f.price) setPrice(show(f.price));
     if (f.category) setCategory(f.category);
     if (f.shop) setShop(f.shop);
-    if (f.note) setNote(f.note);
-    if (f.render) setRender(f.render);
-    // Gemini draws the picture itself; a screenshot read by OCR leaves it to the 3D search.
-    if (!f.render && f.title) setFind((n) => n + 1);
+    if (f.title) setFind((n) => n + 1);
   };
 
   const today = new Date();
@@ -614,7 +532,7 @@ function WishForm({ id }: { id?: string }) {
           <CutBusy busy={photo.busy} />
         </motion.div>
       </div>
-      <ProductTools photo={photo} has={!!img} title={title} hint={render} categories={known} onFilled={filled} find={find} />
+      <ProductTools photo={photo} has={!!img} title={title} onFilled={filled} find={find} />
 
       <input className="field t-headline" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Что хочется" aria-label="Название" maxLength={80} />
       <label className="sp-amount sp-amount--sm">
@@ -656,13 +574,11 @@ function WishForm({ id }: { id?: string }) {
 function DreamForm() {
   const car = useStore((s) => s.shared.car);
   const savedImg = useImage(car.imgId);
-  const key = useGeminiKey();
   const [url, setUrl] = useState(car.url ?? '');
   const [name, setName] = useState(car.name);
   const [price, setPrice] = useState(show(car.price));
   const [saved, setSaved] = useState(show(car.saved ?? 0));
   const [date, setDate] = useState(car.date);
-  const [render, setRender] = useState('');
   const [find, setFind] = useState(0);
   const photo = usePhoto();
 
@@ -672,16 +588,13 @@ function DreamForm() {
   const state = useLookup(url, (p) => {
     if (p.title) setName(p.title);
     if (p.price) setPrice(show(p.price));
-    if (img || photo.busy || !p.title) return;
-    if (key) void photo.draw(p.title, key);
-    else setFind((n) => n + 1);
+    if (!img && !photo.busy && p.title) setFind((n) => n + 1);
   });
 
   const filled = (f: Filled) => {
     if (f.title) setName(f.title);
     if (f.price) setPrice(show(f.price));
-    if (f.render) setRender(f.render);
-    if (!f.render && f.title) setFind((n) => n + 1);
+    if (f.title) setFind((n) => n + 1);
   };
 
   const save = async (e: FormEvent) => {
@@ -706,7 +619,7 @@ function DreamForm() {
         )}
         <CutBusy busy={photo.busy} />
       </div>
-      <ProductTools photo={photo} has={!!img} title={name} hint={render} categories={[]} onFilled={filled} find={find} />
+      <ProductTools photo={photo} has={!!img} title={name} onFilled={filled} find={find} />
 
       <input className="field t-headline" value={name} onChange={(e) => setName(e.target.value)} placeholder="Например, Porsche Panamera" aria-label="Мечта" maxLength={60} />
       <LinkField value={url} onChange={setUrl} state={state} />

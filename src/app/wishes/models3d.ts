@@ -52,7 +52,7 @@ export async function toEnglish(text: string, signal?: AbortSignal): Promise<str
   const q = cleanQuery(text);
   if (!/[а-яё]/i.test(q)) return q;
   const stop = new AbortController();
-  const timer = setTimeout(() => stop.abort(), 6000);
+  const timer = setTimeout(() => stop.abort(), 3000);
   const abort = () => stop.abort();
   signal?.addEventListener('abort', abort);
   try {

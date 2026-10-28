@@ -1,27 +1,23 @@
 import type { PSM, Worker } from 'tesseract.js';
-import type { CutoutResult } from '../../lib/cutoutBrowser';
-import { cutOut, type CutStage } from './cutout';
 import { shortTitle } from './link';
-import type { Rect } from './mask';
+
+type Rect = [x: number, y: number, w: number, h: number];
 
 /*
- * A screenshot of a product page in the Ozon app → name, price, product photo. Ozon lets no
+ * A screenshot of a product page in the Ozon app → name and price. Ozon lets no
  * outside reader at its pages, but the user can always screenshot what they are looking at.
  * Layout of the app's product page: the photo card on top, the price row right under it with
  * the current price in green (the old one is grey and struck out), then «С банками»…
  * The name proper is further down, so the big headline printed on the photo stands in for it.
  */
 
-export type ShotStage = 'read' | CutStage;
+export type ShotStage = 'read';
 
 export interface ShotInfo {
   /** The price row was found, so it is the Ozon product page. */
   ozon: boolean;
   title?: string;
   price?: number;
-  photo?: CutoutResult;
-  /** The photo card as is, for «Как есть». */
-  card?: Blob;
 }
 
 interface Px {
@@ -181,21 +177,23 @@ function priceCanvas({ d, w }: Px, row: PriceRow) {
   return c;
 }
 
+/** The headline sits in the upper part of the photo; the rest is product and fine print. */
+const HEADLINE_SHARE = 0.6;
+
 /**
- * The card without the app's own buttons on it (back, search, share, like, «Похожие»):
- * each is painted over with the photo right below it so the cut-out does not pick it up.
+ * The upper part of the photo card without the app's own buttons on it (back, search, share,
+ * like): each is painted over so OCR does not read their icons as letters.
  */
-function cardCanvas(src: HTMLCanvasElement, w: number, card: { top: number; bottom: number }) {
+function cardCanvas(src: HTMLCanvasElement, w: number, card: { top: number; bottom: number }, share = 1) {
   const c = document.createElement('canvas');
   c.width = w;
-  c.height = card.bottom - card.top;
+  c.height = Math.round((card.bottom - card.top) * share);
   const x = c.getContext('2d')!;
   x.drawImage(src, 0, card.top, w, c.height, 0, 0, w, c.height);
   const u = w / 100;
   const patches: Rect[] = [
     [1.5 * u, 1.5 * u, 10.5 * u, 10.5 * u],
     [67.5 * u, 1.5 * u, 31 * u, 10.5 * u],
-    [79 * u, c.height - 10 * u, 20 * u, 8.5 * u],
   ];
   for (const [px, py, pw, ph] of patches) {
     // Flat colour of the strip under the button: copying the photo itself would bring in
@@ -209,7 +207,7 @@ function cardCanvas(src: HTMLCanvasElement, w: number, card: { top: number; bott
     x.fillStyle = `rgb(${avg.join(',')})`;
     x.fillRect(px, py, pw, ph);
   }
-  return { c, patches };
+  return c;
 }
 
 // tesseract.js declares PSM as a const enum, which does not survive per-file compilation.
@@ -234,42 +232,48 @@ async function linesOf(worker: Worker, c: HTMLCanvasElement, mode: PSM, scale: n
   );
 }
 
-const toBlob = (c: HTMLCanvasElement) => new Promise<Blob>((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('encode'))), 'image/png'));
+let ocr: Promise<Worker> | null = null;
+
+/**
+ * The Russian OCR, started once and kept: loading it is a good part of the wait, so the form
+ * calls this as soon as it opens and the screenshot then meets a ready reader.
+ */
+export function warmOcr(): Promise<Worker> {
+  ocr ??= import('tesseract.js')
+    .then(({ createWorker }) => createWorker('rus', 1))
+    .catch((e) => {
+      ocr = null;
+      throw e;
+    });
+  return ocr;
+}
 
 export async function readShot(file: Blob, onStage?: (stage: ShotStage, share: number) => void): Promise<ShotInfo> {
   onStage?.('read', 0);
+  const worker = warmOcr();
   const { c, px } = await pixels(file);
   // A phone screen is tall; product photos are not, and their green bits are no price row.
   if (px.h / px.w < 1.8) return { ozon: false };
   const row = findPrice(px);
   if (!row) return { ozon: false };
   const card = findCard(px, row.top);
-  const { c: cardC, patches } = cardCanvas(c, px.w, card);
+  const whole = cardCanvas(c, px.w, card);
+  const head = cardCanvas(c, px.w, card, HEADLINE_SHARE);
 
-  const { createWorker } = await import('tesseract.js');
-  const worker = await createWorker('rus', 1, {
-    logger: (m) => m.status === 'recognizing text' && onStage?.('read', m.progress),
-  });
-  let price: number | undefined;
-  let title: string | undefined;
-  try {
-    await worker.setParameters({ tessedit_pageseg_mode: SINGLE_LINE, tessedit_char_whitelist: '0123456789 ' });
-    price = priceFrom((await worker.recognize(priceCanvas(px, row))).data.text);
+  const w = await worker;
+  await w.setParameters({ tessedit_pageseg_mode: SINGLE_LINE, tessedit_char_whitelist: '0123456789 ' });
+  const price = priceFrom((await w.recognize(priceCanvas(px, row))).data.text);
 
-    // Poster lettering reads unevenly: a sparse pass at twice the size and a page pass at
-    // full size each catch lines the other misses.
-    const big = document.createElement('canvas');
-    big.width = cardC.width * 2;
-    big.height = cardC.height * 2;
-    big.getContext('2d')!.drawImage(cardC, 0, 0, big.width, big.height);
-    const sparse = await linesOf(worker, big, SPARSE_TEXT, 2);
-    const page = await linesOf(worker, cardC, AUTO, 1);
-    title = titleFrom(mergeLines([sparse, page]), cardC.height);
-  } finally {
-    await worker.terminate();
-  }
-
-  const cardBlob = await toBlob(cardC);
-  const photo = await cutOut(cardBlob, onStage, patches);
-  return { ozon: true, title, price, photo, card: cardBlob };
+  // Poster lettering reads unevenly: a sparse pass at twice the size (over the headline part
+  // only — it is the slow one) and a page pass over the whole card each catch lines the
+  // other misses.
+  const big = document.createElement('canvas');
+  big.width = head.width * 2;
+  big.height = head.height * 2;
+  big.getContext('2d')!.drawImage(head, 0, 0, big.width, big.height);
+  const sparse = await linesOf(w, big, SPARSE_TEXT, 2);
+  const page = await linesOf(w, whole, AUTO, 1);
+  // Scored against the whole card, as the lines' heights and places were tuned on it.
+  const title = titleFrom(mergeLines([sparse, page]), card.bottom - card.top);
+  return { ozon: true, title, price };
 }
