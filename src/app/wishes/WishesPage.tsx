@@ -1,15 +1,19 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { actions, useStore } from '../../lib/appStore';
 import { parseDay } from '../../lib/dates';
+import { getLaunch } from '../../lib/telegram';
 import type { Buy } from '../../lib/types';
 import { Icon } from '../../ui/Icon';
+import { toast } from '../../ui/Toast';
 import { useImage } from '../../ui/useImage';
 import { PanameraSvg } from '../../screens/dream/PanameraSvg';
 import { money } from '../money/logic';
 import { openSheet, useSheet, useSheetData } from '../sheet';
 import { rise } from '../ui/motion';
 import { CountUp, EASE } from '../ui/text';
+import { importText, useImportRun } from './importer';
 import { activeWishes, boughtWishes, categoriesOf, dreamPlan, dueOf, looksLikeCar, wishesTotal } from './logic';
 import { WishArt, WishFace } from './WishCard';
 import './wishes.css';
@@ -22,6 +26,9 @@ try {
 } catch {
   /* storage blocked: nothing was saved either */
 }
+
+/** Opened by the Safari shortcut: the products it read are waiting in the clipboard. */
+const fromShortcut = getLaunch().param === 'wish';
 
 export function WishesPage() {
   const buys = useStore((s) => s.shared.buys);
@@ -38,10 +45,6 @@ export function WishesPage() {
           <h1 className="w-title">Желания</h1>
           <p className="t-caption muted">Мечта и всё, что хочется купить</p>
         </div>
-        <motion.button type="button" className="m-round w-add" aria-label="Добавить хотелку" onClick={() => openSheet('wish')} whileTap={{ scale: 0.86 }} whileHover={{ scale: 1.06 }}>
-          <Icon name="plus" size={20} stroke={2.2} />
-          {active.length > 0 && <span className="w-badge t-num">{active.length}</span>}
-        </motion.button>
       </motion.header>
 
       <motion.div {...rise(0.12)}>
@@ -73,16 +76,29 @@ export function WishesPage() {
           </AnimatePresence>
         </motion.div>
       ) : (
-        <motion.button type="button" className="w-empty" onClick={() => openSheet('wish')} {...rise(0.26)} whileTap={{ scale: 0.98 }}>
+        <motion.div className="w-empty" {...rise(0.26)}>
           <span className="w-empty-icon">
             <Icon name="link" size={22} />
           </span>
-          <span className="t-headline">Добавьте первую хотелку</span>
-          <span className="t-caption muted">Вставьте ссылку на товар — название и фото подтянутся сами</span>
-        </motion.button>
+          <span className="t-headline">Вставьте ссылку на товар</span>
+          <span className="t-caption muted">Можно сразу несколько — каждая станет карточкой с названием, ценой и фото</span>
+        </motion.div>
       )}
 
+      <motion.button type="button" className="w-ozon" onClick={() => openSheet('wishImport')} whileTap={{ scale: 0.98 }} {...rise(0.28)}>
+        <span className="w-ozon-icon">
+          <Icon name="bag" size={18} />
+        </span>
+        <span className="w-ozon-text">
+          <span className="t-body">Товары и корзина с Ozon</span>
+          <span className="t-caption muted">Быстрая команда для Safari и закладка для компьютера</span>
+        </span>
+        <Icon name="chevron" size={16} />
+      </motion.button>
+
       {bought.length > 0 && <Bought list={bought} />}
+
+      <AddBar />
     </div>
   );
 }
@@ -112,6 +128,95 @@ function WishCard({ buy, index }: { buy: Buy; index: number }) {
         onAct={() => actions.updateBuy(buy.id, { boughtAt: Date.now() })}
       />
     </motion.article>
+  );
+}
+
+/* ───────── the bar to paste links into ───────── */
+
+function AddBar() {
+  const [text, setText] = useState('');
+  const [hint, setHint] = useState(fromShortcut);
+  const input = useRef<HTMLInputElement>(null);
+  const busy = useImportRun();
+
+  useEffect(() => {
+    if (!hint) return;
+    const t = setTimeout(() => setHint(false), 12000);
+    return () => clearTimeout(t);
+  }, [hint]);
+
+  const take = (t: string) => {
+    if (importText(t)) {
+      setText('');
+      setHint(false);
+      input.current?.blur();
+      return true;
+    }
+    return false;
+  };
+  const paste = async () => {
+    try {
+      const t = await navigator.clipboard.readText();
+      if (t && take(t)) return;
+      toast(t ? 'В скопированном нет ссылок на товары' : 'Буфер обмена пуст');
+    } catch {
+      // The webview may refuse to read the clipboard; a long-press paste into the field still works.
+      input.current?.focus();
+      toast('Нажмите на поле и выберите «Вставить»');
+    }
+  };
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const t = text.trim();
+    if (!t || take(t)) return;
+    // No link: a wish named by hand.
+    openSheet('wish', { title: t });
+    setText('');
+  };
+
+  // Beside the page, not in it: its slide-in transform would carry a fixed bar along.
+  return createPortal(
+    <motion.form className={`w-bar${hint ? ' is-hint' : ''}`} onSubmit={submit} initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.55, duration: 0.6, ease: EASE }}>
+      <AnimatePresence>
+        {hint && (
+          <motion.p className="w-bar-tip t-caption" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}>
+            Товары скопированы — нажмите «Вставить»
+          </motion.p>
+        )}
+      </AnimatePresence>
+      <motion.button type="button" className="w-bar-new" aria-label="Заполнить вручную" onClick={() => openSheet('wish')} whileTap={{ scale: 0.86 }}>
+        <Icon name="edit" size={19} />
+      </motion.button>
+      <label className="w-bar-field">
+        {busy ? <span className="wf-spin" /> : <Icon name="link" size={18} />}
+        <input
+          ref={input}
+          className="w-bar-input t-body"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onPaste={(e) => {
+            const t = e.clipboardData.getData('text');
+            if (t && take(t)) e.preventDefault();
+          }}
+          placeholder={busy ? `Добавляю ${busy.done} из ${busy.total}…` : 'Ссылка на товар'}
+          inputMode="url"
+          enterKeyHint="done"
+          autoCapitalize="off"
+          autoCorrect="off"
+          aria-label="Ссылка на товар"
+        />
+        {text ? (
+          <motion.button type="submit" className="w-bar-go" aria-label="Добавить" whileTap={{ scale: 0.86 }}>
+            <Icon name="check" size={18} stroke={2.6} />
+          </motion.button>
+        ) : (
+          <motion.button type="button" className="w-bar-paste t-caption" onClick={() => void paste()} whileTap={{ scale: 0.92 }}>
+            Вставить
+          </motion.button>
+        )}
+      </label>
+    </motion.form>,
+    document.querySelector('.app') ?? document.body,
   );
 }
 

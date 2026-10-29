@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 
-export type SheetKind = 'more' | 'task' | 'profile' | 'spend' | 'spendView' | 'income' | 'budget' | 'category' | 'subs' | 'wish' | 'wishView' | 'dream' | 'dreamSave';
+export type SheetKind = 'more' | 'task' | 'profile' | 'spend' | 'spendView' | 'income' | 'budget' | 'category' | 'subs' | 'wish' | 'wishView' | 'wishImport' | 'dream' | 'dreamSave';
 
 /** What a sheet is about: the month it works in, and the record it edits or shows. */
 export interface SheetData {
@@ -8,6 +8,8 @@ export interface SheetData {
   id?: string;
   /** Open the spend form straight into the receipt camera. */
   scan?: boolean;
+  /** A new wish already named. */
+  title?: string;
 }
 
 let current: { kind: SheetKind; data: SheetData } | null = null;

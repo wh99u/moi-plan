@@ -19,6 +19,7 @@ import { fetchRender, searchModels, toEnglish, type Model3d } from './models3d';
 import { activeWishes, categoriesOf, DEFAULT_CATEGORIES, dreamPlan, dueOf, looksLikeCar } from './logic';
 import { readShot, warmOcr, type ShotStage } from './shot';
 import { WishFace } from './WishCard';
+import { ImportGuide } from './ImportGuide';
 import { WishDetail } from './WishDetail';
 
 /** «1 234,5» → 1234.5; empty or junk → 0. */
@@ -31,9 +32,12 @@ export function WishesSheets() {
   return (
     <>
       <Sheet open={kind === 'wish'} onClose={closeSheet} title={data.id ? 'Изменить хотелку' : 'Новая хотелка'}>
-        <WishForm key={data.id ?? 'new'} id={data.id} />
+        <WishForm key={data.id ?? 'new'} id={data.id} name={data.title} />
       </Sheet>
       <WishDetail />
+      <Sheet open={kind === 'wishImport'} onClose={closeSheet} title="Товары с Ozon">
+        <ImportGuide />
+      </Sheet>
       <Sheet open={kind === 'dream'} onClose={closeSheet} title="Главная мечта">
         <DreamForm />
       </Sheet>
@@ -458,14 +462,14 @@ function LinkField({ value, onChange, state }: { value: string; onChange: (v: st
 
 /* ───────── new / edit wish ───────── */
 
-function WishForm({ id }: { id?: string }) {
+function WishForm({ id, name }: { id?: string; name?: string }) {
   const buy = useStore((s) => s.shared.buys.find((b) => b.id === id));
   const buys = useStore((s) => s.shared.buys);
   const savedImg = useImage(buy?.imgId);
   const known = useMemo(() => categoriesOf(activeWishes(buys)), [buys]);
 
   const [url, setUrl] = useState(buy?.url ?? '');
-  const [title, setTitle] = useState(buy?.title ?? '');
+  const [title, setTitle] = useState(buy?.title ?? name ?? '');
   const [category, setCategory] = useState(buy?.category ?? '');
   const [note, setNote] = useState(buy?.note ?? '');
   const [price, setPrice] = useState(show(buy?.price ?? 0));

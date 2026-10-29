@@ -8,6 +8,7 @@ import { closeSheet } from './sheet';
 import { Sheets } from './sheets';
 import { Soon } from './Soon';
 import { EASE } from './ui/text';
+import { ToastHost } from '../ui/Toast';
 import { WishesPage } from './wishes/WishesPage';
 
 export function App() {
@@ -44,6 +45,7 @@ export function App() {
         </AnimatePresence>
         <Nav route={route} />
         <Sheets />
+        <ToastHost />
       </div>
     </MotionConfig>
   );
