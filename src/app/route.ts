@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { getLaunch } from '../lib/telegram';
 
 export type Tab = 'home' | 'money' | 'wishes' | 'tasks';
 export type Extra = 'stocks' | 'sleep' | 'mood' | 'github' | 'jarvis';
@@ -38,6 +39,8 @@ export const tabIndex = (r: Route) => {
 /** Hash routes (#/money) keep GitHub Pages happy and make the browser «Back» work. */
 function read(): Route {
   const path = location.hash.replace(/^#\/?/, '').split('?')[0];
+  // The Safari shortcut opens the app to paste the products it copied.
+  if (!path && getLaunch().param === 'wish') return 'wishes';
   return ALL.some((s) => s.id === path) ? (path as Route) : 'home';
 }
 
