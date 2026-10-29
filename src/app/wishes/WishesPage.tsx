@@ -1,10 +1,9 @@
-import { AnimatePresence, animate, motion, useMotionValue, useTransform, type PanInfo } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { actions, useStore } from '../../lib/appStore';
 import { parseDay } from '../../lib/dates';
-import { deleteImage } from '../../lib/images';
-import { getLaunch, haptic } from '../../lib/telegram';
+import { getLaunch } from '../../lib/telegram';
 import type { Buy } from '../../lib/types';
 import { Icon } from '../../ui/Icon';
 import { toast } from '../../ui/Toast';
@@ -16,7 +15,7 @@ import { rise } from '../ui/motion';
 import { CountUp, EASE } from '../ui/text';
 import { importText, useImportRun } from './importer';
 import { activeWishes, boughtWishes, categoriesOf, dreamPlan, dueOf, looksLikeCar, wishesTotal } from './logic';
-import { artId, nameId, WishArt } from './WishCard';
+import { WishArt, WishFace } from './WishCard';
 import './wishes.css';
 
 const SPRING = { type: 'spring', stiffness: 420, damping: 34 } as const;
@@ -31,34 +30,13 @@ try {
 /** Opened by the Safari shortcut: the products it read are waiting in the clipboard. */
 const fromShortcut = getLaunch().param === 'wish';
 
-/** Unticked wishes stay unticked while the app is open. */
-let untickedSaved = new Set<string>();
-
 export function WishesPage() {
   const buys = useStore((s) => s.shared.buys);
   const active = useMemo(() => activeWishes(buys), [buys]);
   const bought = useMemo(() => boughtWishes(buys), [buys]);
   const cats = useMemo(() => categoriesOf(active), [active]);
   const [cat, setCat] = useState<string | null>(null);
-  const [unticked, setUnticked] = useState(untickedSaved);
   const shown = cat && cats.includes(cat) ? active.filter((b) => b.category === cat) : active;
-  const ticked = shown.filter((b) => !unticked.has(b.id));
-  const all = shown.length > 0 && ticked.length === shown.length;
-
-  const untick = (next: Set<string>) => {
-    untickedSaved = next;
-    setUnticked(next);
-  };
-  const toggle = (id: string) => {
-    const next = new Set(unticked);
-    if (!next.delete(id)) next.add(id);
-    untick(next);
-  };
-  const toggleAll = () => {
-    const next = new Set(unticked);
-    shown.forEach((b) => (all ? next.add(b.id) : next.delete(b.id)));
-    untick(next);
-  };
 
   return (
     <div className="wishes">
@@ -73,8 +51,13 @@ export function WishesPage() {
         <Dream />
       </motion.div>
 
+      <motion.div className="w-list-head" {...rise(0.2)}>
+        <span className="t-headline">Список</span>
+        {active.length > 0 && <span className="t-caption muted t-num">{money(wishesTotal(active))}</span>}
+      </motion.div>
+
       {cats.length > 1 && (
-        <motion.div className="w-filters" role="radiogroup" aria-label="Категория" {...rise(0.2)}>
+        <motion.div className="w-filters" role="radiogroup" aria-label="Категория" {...rise(0.24)}>
           {[null, ...cats].map((c) => (
             <button key={c ?? 'all'} type="button" role="radio" aria-checked={cat === c} className="w-filter t-caption" onClick={() => setCat(c)}>
               {cat === c && <motion.span layoutId="w-filter-on" className="w-filter-pill" transition={SPRING} />}
@@ -85,30 +68,15 @@ export function WishesPage() {
       )}
 
       {active.length ? (
-        <motion.div className="m-card w-list" {...rise(0.24)}>
-          <div className="w-list-head">
-            <button type="button" className="w-all" onClick={toggleAll} aria-pressed={all}>
-              <Check on={all} />
-              <span className="t-body">Выбрать все</span>
-            </button>
-            <span className="w-sum">
-              <span className="t-headline t-num">{money(wishesTotal(ticked))}</span>
-              <span className="t-caption muted t-num">
-                {ticked.length} из {shown.length}
-              </span>
-            </span>
-          </div>
-          <ul className="w-rows">
-            <AnimatePresence initial={false}>
-              {shown.map((b) => (
-                <WishRow key={b.id} buy={b} ticked={!unticked.has(b.id)} onTick={() => toggle(b.id)} />
-              ))}
-            </AnimatePresence>
-          </ul>
-          <p className="t-caption muted w-hint">Свайп вправо — куплено, влево — удалить</p>
+        <motion.div className="w-grid" layout>
+          <AnimatePresence mode="popLayout">
+            {shown.map((b, i) => (
+              <WishCard key={b.id} buy={b} index={i} />
+            ))}
+          </AnimatePresence>
         </motion.div>
       ) : (
-        <motion.div className="w-empty" {...rise(0.24)}>
+        <motion.div className="w-empty" {...rise(0.26)}>
           <span className="w-empty-icon">
             <Icon name="link" size={22} />
           </span>
@@ -135,145 +103,31 @@ export function WishesPage() {
   );
 }
 
-function Check({ on }: { on: boolean }) {
-  return (
-    <span className={`w-check${on ? ' is-on' : ''}`} aria-hidden="true">
-      <AnimatePresence initial={false}>
-        {on && (
-          <motion.span initial={{ scale: 0.3, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.3, opacity: 0 }} transition={{ type: 'spring', stiffness: 600, damping: 26 }}>
-            <Icon name="check" size={14} stroke={3} />
-          </motion.span>
-        )}
-      </AnimatePresence>
-    </span>
-  );
-}
-
-/* ───────── one wish: a row that swipes ───────── */
-
-/** How far a row travels before letting go does something. */
-const COMMIT = 96;
-
-function markBought(buy: Buy) {
-  actions.updateBuy(buy.id, { boughtAt: Date.now() });
-  haptic('success');
-  toast(`Куплено: ${buy.title}`, 'success', { label: 'Отменить', run: () => actions.updateBuy(buy.id, { boughtAt: undefined }) });
-}
-
-function remove(buy: Buy) {
-  actions.deleteBuy(buy.id);
-  haptic('warning');
-  let undone = false;
-  toast(`Удалено: ${buy.title}`, 'info', {
-    label: 'Отменить',
-    run: () => {
-      undone = true;
-      actions.updateBuy(buy.id, { deleted: undefined });
-    },
-  });
-  // The photo goes once the chance to undo has passed.
-  if (buy.imgId) setTimeout(() => !undone && void deleteImage(buy.imgId!).catch(() => {}), 6000);
-}
-
-function WishRow({ buy, ticked, onTick }: { buy: Buy; ticked: boolean; onTick: () => void }) {
+function WishCard({ buy, index }: { buy: Buy; index: number }) {
   const img = useImage(buy.imgId);
   const due = dueOf(buy.due, new Date());
-  // While its page is open the product lives there; the row keeps an empty frame.
+  // While its page is open the product lives there; the card keeps an empty stage.
   const sheet = useSheet();
   const sheetData = useSheetData();
   const open = sheet === 'wishView' && sheetData.id === buy.id;
-
-  const x = useMotionValue(0);
-  const moved = useRef(false);
-  const armed = useRef(0);
-  const buyOpacity = useTransform(x, [0, 24, COMMIT], [0, 0.6, 1]);
-  const dropOpacity = useTransform(x, [-COMMIT, -24, 0], [1, 0.6, 0]);
-  const buyScale = useTransform(x, [0, COMMIT], [0.6, 1]);
-  const dropScale = useTransform(x, [-COMMIT, 0], [1, 0.6]);
-
-  const onDrag = (_: unknown, info: PanInfo) => {
-    if (Math.abs(info.offset.x) > 6) moved.current = true;
-    const side = info.offset.x >= COMMIT ? 1 : info.offset.x <= -COMMIT ? -1 : 0;
-    if (side !== armed.current) {
-      armed.current = side;
-      if (side) haptic('selection');
-    }
-  };
-  const onDragEnd = (_: unknown, info: PanInfo) => {
-    const side = info.offset.x >= COMMIT || info.velocity.x > 800 ? 1 : info.offset.x <= -COMMIT || info.velocity.x < -800 ? -1 : 0;
-    armed.current = 0;
-    if (!side) return void animate(x, 0, { type: 'spring', stiffness: 520, damping: 38 });
-    void animate(x, side * window.innerWidth, { duration: 0.22, ease: 'easeIn' }).then(() => (side > 0 ? markBought(buy) : remove(buy)));
-  };
-
   return (
-    <motion.li
+    <motion.article
       layout
-      className="wr"
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: 'auto' }}
-      exit={{ opacity: 0, height: 0, transition: { duration: 0.28, ease: EASE } }}
-      transition={SPRING}
+      className="wish"
+      initial={{ opacity: 0, y: 28, scale: 0.94 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.7, filter: 'blur(6px)' }}
+      transition={{ ...SPRING, delay: Math.min(index, 8) * 0.05 }}
+      whileTap={{ scale: 0.97 }}
+      onClick={() => openSheet('wishView', { id: buy.id })}
     >
-      <div className="wr-under" aria-hidden="true">
-        <motion.span className="wr-under-buy" style={{ opacity: buyOpacity }}>
-          <motion.span style={{ scale: buyScale }}>
-            <Icon name="check" size={22} stroke={2.6} />
-          </motion.span>
-          Куплено
-        </motion.span>
-        <motion.span className="wr-under-drop" style={{ opacity: dropOpacity }}>
-          Удалить
-          <motion.span style={{ scale: dropScale }}>
-            <Icon name="trash" size={20} />
-          </motion.span>
-        </motion.span>
-      </div>
-      <motion.div
-        className="wr-card"
-        style={{ x }}
-        drag="x"
-        dragDirectionLock
-        dragMomentum={false}
-        onDragStart={() => (moved.current = false)}
-        onDrag={onDrag}
-        onDragEnd={onDragEnd}
-        onClick={() => {
-          if (moved.current) return void (moved.current = false);
-          openSheet('wishView', { id: buy.id });
-        }}
-      >
-        <div className="wr-art">
-          {!open && (
-            <motion.div className="wr-art-in" layoutId={artId(buy.id)}>
-              <WishArt img={img} cut={buy.cut} title={buy.title} tint={buy.tint} />
-            </motion.div>
-          )}
-          <button
-            type="button"
-            className="wr-tick"
-            aria-label={ticked ? 'Не считать в сумме' : 'Считать в сумме'}
-            aria-pressed={ticked}
-            onClick={(e) => {
-              e.stopPropagation();
-              onTick();
-            }}
-          >
-            <Check on={ticked} />
-          </button>
-        </div>
-        <div className="wr-body">
-          <span className="wr-price t-num">{buy.price ? money(buy.price) : 'Цена не указана'}</span>
-          <motion.span className="wr-name" layoutId={nameId(buy.id)}>
-            {buy.title}
-          </motion.span>
-          <span className="wr-meta t-caption">
-            {(buy.category || buy.shop) && <span className="wr-shop">{buy.category || buy.shop}</span>}
-            {due && <span className={`wr-due${due.urgent ? ' is-urgent' : ''}`}>{due.short}</span>}
-          </span>
-        </div>
-      </motion.div>
-    </motion.li>
+      <WishFace
+        face={{ title: buy.title, category: buy.category || buy.shop, price: buy.price, due, img, cut: buy.cut, tint: buy.tint }}
+        id={buy.id}
+        hideArt={open}
+        onAct={() => actions.updateBuy(buy.id, { boughtAt: Date.now() })}
+      />
+    </motion.article>
   );
 }
 
