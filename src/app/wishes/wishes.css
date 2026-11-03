@@ -398,16 +398,24 @@
   object-position: center top;
   border-radius: 22px;
 }
+/* A white line icon stands whole in the lower half (a cut-off outline would read as broken). */
+.wish-img.is-icon {
+  width: 58%;
+  max-height: 46%;
+  margin-top: 6%;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 22px rgba(255, 255, 255, 0.07));
+}
+/* No picture yet: a built-in white icon guessed from the name. */
 .wish-ph {
-  --tint: #d6223f;
   display: grid;
   place-items: center;
-  width: 86px;
-  height: 120px;
-  border-radius: 26px;
-  color: #fff;
-  background: radial-gradient(120% 120% at 30% 20%, color-mix(in srgb, var(--tint) 55%, #fff), var(--tint) 55%, color-mix(in srgb, var(--tint) 60%, #000));
-  box-shadow: 0 -8px 26px -14px var(--tint);
+  margin-top: 8%;
+  color: rgba(255, 255, 255, 0.9);
+}
+.wish-ph svg {
+  width: 72px;
+  height: 72px;
 }
 .wish-act {
   position: absolute;
@@ -508,13 +516,22 @@
   border-radius: 0;
 }
 .w-bought-art .wish-ph {
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
+  margin: 0;
+  color: var(--text-2);
 }
 .w-bought-art .wish-ph svg {
   width: 22px;
   height: 22px;
+}
+.w-bought-art .wish-img.is-icon {
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  filter: none;
+}
+[data-theme='light'] .w-bought-art .wish-img.is-icon {
+  filter: brightness(0);
+  opacity: 0.6;
 }
 .w-bought-text {
   flex: 1;
@@ -757,10 +774,22 @@
   height: auto;
   border-radius: 26px;
 }
+/* On the light stage of an opened wish the white icon turns ink-dark. */
+.wd-art .wish-img.is-icon {
+  width: 44%;
+  max-width: 220px;
+  max-height: 70%;
+  margin: 0;
+  filter: brightness(0);
+  opacity: 0.86;
+}
 .wd-art .wish-ph {
-  width: 130px;
-  height: 170px;
-  border-radius: 38px;
+  margin: 0;
+  color: #141416;
+}
+.wd-art .wish-ph svg {
+  width: 120px;
+  height: 120px;
 }
 .wd-body {
   position: relative;
@@ -953,4 +982,22 @@
 }
 .wf-credit {
   text-align: center;
+}
+
+/* Icons in the picker and on the dream. */
+.wf-icon {
+  display: grid;
+  place-items: center;
+  background: #1e1e21;
+}
+.wf-icon img {
+  width: 54%;
+  height: 54%;
+  object-fit: contain;
+}
+.w-dream-img.is-icon {
+  height: 120px;
+  width: auto;
+  border-radius: 0;
+  filter: drop-shadow(0 10px 24px rgba(255, 77, 102, 0.35));
 }

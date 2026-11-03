@@ -55,7 +55,7 @@ function Page({ id }: { id: string }) {
         </motion.button>
       </motion.div>
       <motion.div className="wd-art" layoutId={artId(id)} transition={SPRING}>
-        <WishArt img={img} cut={buy.cut} title={buy.title} tint={buy.tint} />
+        <WishArt img={img} cut={buy.cut} icon={buy.icon} title={buy.title} tint={buy.tint} />
       </motion.div>
 
       <div className="wd-body">

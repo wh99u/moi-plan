@@ -1,13 +1,12 @@
 import { useSyncExternalStore } from 'react';
 
-export type SheetKind = 'more' | 'task' | 'profile' | 'spend' | 'spendView' | 'income' | 'budget' | 'category' | 'subs' | 'wish' | 'wishView' | 'dream' | 'dreamSave';
+export type SheetKind = 'more' | 'task' | 'profile' | 'tx' | 'txView' | 'card' | 'auto' | 'wish' | 'wishView' | 'dream' | 'dreamSave';
 
-/** What a sheet is about: the month it works in, and the record it edits or shows. */
+/** What a sheet is about: the record it edits or shows. */
 export interface SheetData {
-  ym?: string;
   id?: string;
-  /** Open the spend form straight into the receipt camera. */
-  scan?: boolean;
+  /** Which list the record is from: an income or a spend. */
+  tx?: 'in' | 'out';
 }
 
 let current: { kind: SheetKind; data: SheetData } | null = null;

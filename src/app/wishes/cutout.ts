@@ -2,7 +2,6 @@ import { averageColor, trimTransparent } from '../../lib/cutout';
 import { cutoutFromBlob, type CutoutResult } from '../../lib/cutoutBrowser';
 import type { CutReply } from './cut.worker';
 import { cleanMask, type Rect } from './mask';
-import { removeSmoothBackground } from './smooth';
 
 /*
  * The product, cut out of its photo. Studio shots on a plain background are cut instantly by
@@ -62,32 +61,6 @@ export async function cutOut(blob: Blob, onStage?: (stage: CutStage, share: numb
   } catch {
     return flat;
   }
-}
-
-async function decode(blob: Blob, max = 1024): Promise<ImageData> {
-  const bmp = await createImageBitmap(blob);
-  const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
-  const c = document.createElement('canvas');
-  c.width = Math.round(bmp.width * k);
-  c.height = Math.round(bmp.height * k);
-  const x = c.getContext('2d', { willReadFrequently: true })!;
-  x.drawImage(bmp, 0, 0, c.width, c.height);
-  bmp.close();
-  return x.getImageData(0, 0, c.width, c.height);
-}
-
-/**
- * A 3D model's studio render: the smoothly shaded backdrop is grown away from the edges in
- * milliseconds; only when that leaves too little or too much does the model take over.
- */
-export async function cutRender(blob: Blob, onStage?: (stage: CutStage, share: number) => void): Promise<CutoutResult> {
-  const img = await decode(blob);
-  const { kept } = removeSmoothBackground(img);
-  if (kept > 0.03 && kept < 0.8) {
-    const r = await fromMask(img);
-    if (r) return r;
-  }
-  return cutOut(blob, onStage);
 }
 
 /** Kept as is, background and all. */

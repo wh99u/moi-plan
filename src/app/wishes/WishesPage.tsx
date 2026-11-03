@@ -106,7 +106,7 @@ function WishCard({ buy, index }: { buy: Buy; index: number }) {
       onClick={() => openSheet('wishView', { id: buy.id })}
     >
       <WishFace
-        face={{ title: buy.title, category: buy.category || buy.shop, price: buy.price, due, img, cut: buy.cut, tint: buy.tint }}
+        face={{ title: buy.title, category: buy.category || buy.shop, price: buy.price, due, img, cut: buy.cut, icon: buy.icon, tint: buy.tint }}
         id={buy.id}
         hideArt={open}
         onAct={() => actions.updateBuy(buy.id, { boughtAt: Date.now() })}
@@ -147,7 +147,7 @@ function BoughtRow({ buy }: { buy: Buy }) {
     <li>
       <button type="button" className="w-bought-row" onClick={() => openSheet('wishView', { id: buy.id })}>
         <span className="w-bought-art">
-          <WishArt img={img} cut={buy.cut} title={buy.title} tint={buy.tint} />
+          <WishArt img={img} cut={buy.cut} icon={buy.icon} title={buy.title} tint={buy.tint} />
         </span>
         <span className="w-bought-text">
           <span className="t-body w-bought-name">{buy.title}</span>
@@ -198,7 +198,7 @@ function Dream() {
         <span className="w-dream-spot" aria-hidden="true" />
         <motion.div className="w-dream-float" initial={{ x: 60, opacity: 0, scale: 0.9 }} animate={{ x: 0, opacity: 1, scale: 1 }} transition={{ type: 'spring', stiffness: 120, damping: 18, delay: 0.25 }}>
           {img ? (
-            <img className={`w-dream-img${car.cut ? ' is-cut' : ''}`} src={img} alt="" draggable={false} />
+            <img className={`w-dream-img${car.cut ? ' is-cut' : ''}${car.icon ? ' is-icon' : ''}`} src={img} alt="" draggable={false} />
           ) : looksLikeCar(car.name) ? (
             <PanameraSvg color={car.color} className="w-dream-svg" />
           ) : (

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { cleanMask } from './mask';
-import { findPrice, mergeLines, priceFrom, titleFrom, type OcrLine } from './shot';
+import { findPrice, fixUnits, mergeLines, nameFrom, priceFrom, priceInLines, titleFrom, type OcrLine } from './shot';
 
 const line = (text: string, size: number, y: number, confidence = 90, x0 = 0, x1 = 500): OcrLine => ({ text, size, y, x0, x1, confidence });
 
@@ -77,5 +77,40 @@ describe('mask clean-up', () => {
     expect(a(img, 0, 0)).toBe(0);
     expect(a(img, 5, 5)).toBe(255);
     expect(share).toBeCloseTo(96 / 400);
+  });
+});
+
+describe('the name in the page text', () => {
+  const ui = (text: string, y: number, size = 30, x0 = 38) => line(text, size, y, 90, x0, x0 + 600);
+
+  test('the name block wins over buttons, offers and prices around it', () => {
+    const lines = [
+      ui('798 ₽ 1984₽ -59%', 1373, 40),
+      ui('С банками ozon банк', 1430),
+      ui('Мили за товары', 1500),
+      ui('Постоплата', 1500, 30, 420),
+      ui('0% до 140 дней', 1560),
+      ui('Гель для душа мужской 3 в 1 GRASS', 1620, 34),
+      ui('Milana Men таинственная Арктика, 5 n', 1662, 34),
+      ui('4.9 · 12 345 отзывов', 1720, 26),
+      ui('В корзину Доставим завтра', 1700, 34, 300),
+    ];
+    expect(nameFrom(lines)).toBe('Гель для душа мужской 3 в 1 GRASS Milana Men таинственная Арктика, 5 л');
+  });
+
+  test('only the shop interface on screen → no name', () => {
+    expect(nameFrom([ui('С банками ozon банк', 1430), ui('Мили за товары', 1500), ui('0% до 140 дней', 1560), ui('Распродажа', 1620)])).toBeUndefined();
+  });
+
+  test('a price from the page text when there is no green row: the biggest one', () => {
+    expect(priceInLines([ui('Цена для вас', 900, 24), ui('12 990 ₽', 960, 48), ui('15 490 ₽', 1020, 28)])).toBe(12990);
+    expect(priceInLines([ui('Без цены', 900)])).toBeUndefined();
+  });
+
+  test('units read as Latin after a number go back to Russian', () => {
+    expect(fixUnits('Гель для душа, 5 n')).toBe('Гель для душа, 5 л');
+    expect(fixUnits('Сок 200 mn и 1 kr')).toBe('Сок 200 мл и 1 кг');
+    expect(fixUnits('AirPods Pro 2')).toBe('AirPods Pro 2');
+    expect(fixUnits('iPhone 15 Pro 256 GB')).toBe('iPhone 15 Pro 256 GB');
   });
 });

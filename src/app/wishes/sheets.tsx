@@ -8,16 +8,17 @@ import { Icon } from '../../ui/Icon';
 import { useImage } from '../../ui/useImage';
 import { PanameraSvg } from '../../screens/dream/PanameraSvg';
 import { money } from '../money/logic';
-import { pickReceipt as pickImage } from '../money/scan';
 import { closeSheet, useSheet, useSheetData } from '../sheet';
+import { pickImage } from '../ui/pickImage';
 import { Segmented } from '../ui/Segmented';
 import { Sheet } from '../ui/Sheet';
 import { EASE } from '../ui/text';
-import { cutRender, keepWhole, type CutStage } from './cutout';
+import { cutOut, keepWhole, type CutStage } from './cutout';
 import { firstUrl, lookup, shopOf, type Product } from './link';
-import { fetchRender, searchModels, toEnglish, type Model3d } from './models3d';
+import { fetchIcon, iconUrl, searchIcons } from './icons';
 import { activeWishes, categoriesOf, DEFAULT_CATEGORIES, dreamPlan, dueOf, looksLikeCar } from './logic';
 import { readShot, warmOcr, type ShotStage } from './shot';
+import { toEnglish } from './words';
 import { WishFace } from './WishCard';
 import { WishDetail } from './WishDetail';
 
@@ -51,6 +52,8 @@ interface Pic {
   url: string;
   tint: string;
   cut: boolean;
+  /** A white line icon rather than a photo. */
+  icon?: boolean;
 }
 
 /** What a screenshot told about the product. */
@@ -64,8 +67,8 @@ interface Filled {
 type Stage = ShotStage | CutStage | 'fetch';
 
 /**
- * The picture on the card: a 3D model's render found on Sketchfab, or the user's own photo —
- * each cut out. `pic`: undefined = untouched, null = removed.
+ * The picture on the card: a white icon found for the name, or the user's own photo cut out.
+ * `pic`: undefined = untouched, null = removed.
  */
 function usePhoto() {
   const [pic, setPic] = useState<Pic | null | undefined>(undefined);
@@ -78,10 +81,10 @@ function usePhoto() {
 
   useEffect(() => () => urls.current.forEach((u) => URL.revokeObjectURL(u)), []);
 
-  const put = (r: CutoutResult) => {
+  const put = (r: CutoutResult, icon = false) => {
     const url = URL.createObjectURL(r.blob);
     urls.current.push(url);
-    setPic({ blob: r.blob, url, tint: r.tint, cut: r.removed });
+    setPic({ blob: r.blob, url, tint: r.tint, cut: r.removed, icon });
   };
 
   /** Runs one picture job; a newer job makes the older one's result void. */
@@ -103,19 +106,16 @@ function usePhoto() {
 
   const process = (blob: Blob, keep: boolean) =>
     job('cut', async (n) => {
-      const r = keep ? await keepWhole(blob) : await cutRender(blob, progress(n));
+      const r = keep ? await keepWhole(blob) : await cutOut(blob, progress(n));
       if (n === run.current) put(r);
     });
 
-  const fromModel = (model: Model3d) =>
+  const fromIcon = (id: string) =>
     job('fetch', async (n) => {
-      const blob = await fetchRender(model);
+      const blob = await fetchIcon(id);
       if (n !== run.current) return;
-      setSource(blob);
-      setWhole(false);
-      setBusy({ stage: 'cut', share: 0 });
-      const r = await cutRender(blob, progress(n));
-      if (n === run.current) put(r);
+      setSource(null);
+      put({ blob, tint: '#ffffff', removed: true }, true);
     });
 
   const own = (blob: Blob) => {
@@ -132,14 +132,14 @@ function usePhoto() {
     error,
     /** A photo of the user's own: cut out, with «Как есть» to undo. */
     own,
-    fromModel,
+    fromIcon,
     /**
      * A product screenshot: an Ozon one is read for name and price (the picture then comes from
-     * the 3D search), anything else is taken as a plain photo.
+     * the icon search), anything else is taken as a plain photo.
      */
     async scan(file: Blob): Promise<Filled | null> {
       const info = await job('read', (n) => readShot(file, progress(n)));
-      if (info?.ozon) return { title: info.title, price: info.price, shop: 'Ozon' };
+      if (info?.screen) return { title: info.title, price: info.price, shop: info.ozon ? 'Ozon' : undefined };
       if (info) own(file);
       return null;
     },
@@ -162,13 +162,13 @@ type Photo = ReturnType<typeof usePhoto>;
 async function storePhoto(oldId: string | undefined, pic: Pic | null | undefined) {
   if (pic === undefined) return null;
   if (oldId) await deleteImage(oldId).catch(() => {});
-  if (!pic) return { imgId: undefined, tint: undefined, cut: undefined };
-  return { imgId: await putImage(pic.blob), tint: pic.tint, cut: pic.cut };
+  if (!pic) return { imgId: undefined, tint: undefined, cut: undefined, icon: undefined };
+  return { imgId: await putImage(pic.blob), tint: pic.tint, cut: pic.cut, icon: pic.icon || undefined };
 }
 
 const BUSY: Record<Stage, string> = {
   read: 'Читаю скриншот…',
-  fetch: 'Загружаю 3D-модель…',
+  fetch: 'Загружаю иконку…',
   model: 'Загружаю нейросеть…',
   cut: 'Вырезаю товар…',
 };
@@ -215,11 +215,11 @@ interface ToolsProps {
 
 type FindState = 'idle' | 'looking' | 'none' | 'error';
 
-/** Screenshot, 3D model search, own photo. */
+/** Screenshot, icon search, own photo. */
 function ProductTools({ photo, has, title, onFilled, find }: ToolsProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [models, setModels] = useState<Model3d[]>([]);
+  const [icons, setIcons] = useState<string[]>([]);
   const [state, setState] = useState<FindState>('idle');
   const [chosen, setChosen] = useState<string | null>(null);
   const seq = useRef(0);
@@ -227,20 +227,20 @@ function ProductTools({ photo, has, title, onFilled, find }: ToolsProps) {
   // Reading screenshots needs the OCR loaded; starting it with the form hides that wait.
   useEffect(() => void warmOcr().catch(() => {}), []);
 
-  const pick = (m: Model3d) => {
-    setChosen(m.id);
-    void photo.fromModel(m);
+  const pick = (id: string) => {
+    setChosen(id);
+    void photo.fromIcon(id);
   };
   const search = async (q: string, pickFirst: boolean) => {
     const n = ++seq.current;
     setOpen(true);
     setState('looking');
     try {
-      const { query: used, models: found } = await searchModels(q);
+      const { query: used, icons: found } = await searchIcons(q);
       if (n !== seq.current) return;
       // Show the query that actually found something, so the user can refine from there.
       setQuery(used);
-      setModels(found);
+      setIcons(found);
       setState(found.length ? 'idle' : 'none');
       if (pickFirst && found[0]) pick(found[0]);
     } catch {
@@ -275,7 +275,7 @@ function ProductTools({ photo, has, title, onFilled, find }: ToolsProps) {
         </motion.button>
         <motion.button type="button" className={`wf-tool t-caption${open ? ' is-on' : ''}`} onClick={() => (open ? setOpen(false) : void fromTitle(false))} whileTap={{ scale: 0.94 }}>
           <Icon name="search" size={15} />
-          Найти 3D
+          Иконка
         </motion.button>
         <motion.button type="button" className="wf-tool t-caption" onClick={() => void pickImage().then((f) => f && photo.own(f))} disabled={!!photo.busy} whileTap={{ scale: 0.94 }}>
           <Icon name="photo" size={16} />
@@ -302,7 +302,7 @@ function ProductTools({ photo, has, title, onFilled, find }: ToolsProps) {
                   if (query.trim()) void search(query.trim(), true);
                 }}
                 placeholder="Что искать, по-английски: soda can"
-                aria-label="Поиск 3D-модели"
+                aria-label="Поиск иконки"
                 autoCapitalize="off"
                 enterKeyHint="search"
               />
@@ -313,33 +313,32 @@ function ProductTools({ photo, has, title, onFilled, find }: ToolsProps) {
             {state === 'looking' && (
               <p className="t-caption wf-note">
                 <span className="wf-spin" />
-                Ищу 3D-модели…
+                Ищу иконки…
               </p>
             )}
             {state === 'none' && <p className="t-caption wf-note is-blocked">Ничего не нашлось — попробуйте проще: «can», «sneakers», «headphones»</p>}
-            {state === 'error' && <p className="t-caption wf-note is-blocked">Каталог 3D-моделей не ответил — попробуйте ещё раз</p>}
-            {state === 'idle' && !models.length && <p className="t-caption muted">Впишите название товара или слово по-английски</p>}
-            {models.length > 0 && (
+            {state === 'error' && <p className="t-caption wf-note is-blocked">Каталог иконок не ответил — попробуйте ещё раз</p>}
+            {state === 'idle' && !icons.length && <p className="t-caption muted">Впишите название товара или слово по-английски</p>}
+            {icons.length > 0 && (
               <div className="wf-models">
-                {models.map((m, i) => (
+                {icons.map((id, i) => (
                   <motion.button
-                    key={m.id}
+                    key={id}
                     type="button"
-                    className={`wf-model${chosen === m.id ? ' is-on' : ''}`}
-                    onClick={() => pick(m)}
-                    aria-label={m.name}
+                    className={`wf-model wf-icon${chosen === id ? ' is-on' : ''}`}
+                    onClick={() => pick(id)}
+                    aria-label={id.split(':')[1]?.replace(/-/g, ' ')}
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ delay: i * 0.03, type: 'spring', stiffness: 420, damping: 28 }}
                     whileTap={{ scale: 0.94 }}
                   >
-                    {/* crossOrigin: the copy cached for the grid stays readable for the cut-out. */}
-                    <img src={m.thumb} alt="" crossOrigin="anonymous" loading="lazy" draggable={false} />
+                    <img src={iconUrl(id, 64)} alt="" loading="lazy" draggable={false} />
                   </motion.button>
                 ))}
               </div>
             )}
-            {models.length > 0 && <p className="t-caption muted wf-credit">3D-модели с Sketchfab · нажмите, чтобы взять другую</p>}
+            {icons.length > 0 && <p className="t-caption muted wf-credit">Иконки из открытых наборов Iconify · нажмите, чтобы взять другую</p>}
           </motion.div>
         )}
       </AnimatePresence>
@@ -476,6 +475,7 @@ function WishForm({ id }: { id?: string }) {
 
   const img = photo.pic === undefined ? savedImg : (photo.pic?.url ?? null);
   const cut = photo.pic === undefined ? buy?.cut : photo.pic?.cut;
+  const icon = photo.pic === undefined ? buy?.icon : photo.pic?.icon;
 
   const state = useLookup(url, (p) => {
     setShop(p.shop);
@@ -528,7 +528,7 @@ function WishForm({ id }: { id?: string }) {
     <form className="form wf" onSubmit={save}>
       <div className="wf-preview">
         <motion.div className="wf-card" layout>
-          <WishFace face={{ title, category: category || shop, price: num(price), due: dueOf(due, today), img, cut, tint: photo.pic?.tint ?? buy?.tint }} />
+          <WishFace face={{ title, category: category || shop, price: num(price), due: dueOf(due, today), img, cut, icon, tint: photo.pic?.tint ?? buy?.tint }} />
           <CutBusy busy={photo.busy} />
         </motion.div>
       </div>
@@ -584,6 +584,7 @@ function DreamForm() {
 
   const img = photo.pic === undefined ? savedImg : (photo.pic?.url ?? null);
   const cut = photo.pic === undefined ? car.cut : photo.pic?.cut;
+  const icon = photo.pic === undefined ? car.icon : photo.pic?.icon;
 
   const state = useLookup(url, (p) => {
     if (p.title) setName(p.title);
@@ -609,7 +610,7 @@ function DreamForm() {
     <form className="form wf" onSubmit={save}>
       <div className="df-stage">
         {img ? (
-          <img className={`w-dream-img${cut ? ' is-cut' : ''}`} src={img} alt="" />
+          <img className={`w-dream-img${cut ? ' is-cut' : ''}${icon ? ' is-icon' : ''}`} src={img} alt="" />
         ) : looksLikeCar(name) ? (
           <PanameraSvg color={car.color} className="w-dream-svg" />
         ) : (

@@ -11,15 +11,20 @@ export interface Face {
   due: Due | null;
   img: string | null;
   cut?: boolean;
+  /** The picture is a white line icon. */
+  icon?: boolean;
   tint?: string;
 }
 
-/** The product itself: a cut-out stands free, a whole photo sits in a soft frame. */
-export function WishArt({ img, cut, title, tint, className = '' }: Pick<Face, 'img' | 'cut' | 'title' | 'tint'> & { className?: string }) {
-  if (img) return <img className={`wish-img ${cut ? 'is-cut' : 'is-photo'} ${className}`} src={img} alt="" draggable={false} />;
+/**
+ * The product itself: a white icon stands whole, a cut-out photo stands free, a whole photo
+ * sits in a soft frame. With no picture yet, a built-in white icon guesses from the name.
+ */
+export function WishArt({ img, cut, icon, title, className = '' }: Pick<Face, 'img' | 'cut' | 'icon' | 'title' | 'tint'> & { className?: string }) {
+  if (img) return <img className={`wish-img ${icon ? 'is-icon' : cut ? 'is-cut' : 'is-photo'} ${className}`} src={img} alt="" draggable={false} />;
   return (
-    <span className={`wish-ph ${className}`} style={tint ? { ['--tint' as string]: tint } : undefined}>
-      <Icon name={iconForTitle(title)} size={40} stroke={1.5} />
+    <span className={`wish-ph ${className}`}>
+      <Icon name={iconForTitle(title)} size={64} stroke={1.3} />
     </span>
   );
 }
@@ -55,7 +60,7 @@ export function WishFace({ face, id, hideArt, onAct }: { face: Face; id?: string
             animate={{ y: 0, opacity: 1, scale: 1 }}
             transition={{ type: 'spring', stiffness: 240, damping: 22, delay: 0.1 }}
           >
-            <WishArt img={face.img} cut={face.cut} title={face.title} tint={face.tint} />
+            <WishArt img={face.img} cut={face.cut} icon={face.icon} title={face.title} tint={face.tint} />
           </motion.div>
         )}
       </div>

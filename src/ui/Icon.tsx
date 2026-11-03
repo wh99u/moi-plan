@@ -24,6 +24,8 @@ const P: Record<string, string> = {
   grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="2"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="2"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="2"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="2"/>',
   transfer: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   pie: '<path d="M12 3v9h9A9 9 0 1 1 12 3z"/><path d="M15.5 3.7A9 9 0 0 1 20.3 8.5h-4.8z"/>',
+  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M4 4l16 16M9.9 5.8A9 9 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3.2 3.9M6.2 7.6A16.5 16.5 0 0 0 2.5 12S6 18.5 12 18.5a9 9 0 0 0 3.8-.8M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
   bolt: '<path d="M13 3L5 13.5h6.2L10 21l8.5-10.5h-6.3z"/>',
   card: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 9.5h18M7 15h3"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/>',

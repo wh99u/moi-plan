@@ -4,17 +4,20 @@ import { shortTitle } from './link';
 type Rect = [x: number, y: number, w: number, h: number];
 
 /*
- * A screenshot of a product page in the Ozon app → name and price. Ozon lets no
- * outside reader at its pages, but the user can always screenshot what they are looking at.
- * Layout of the app's product page: the photo card on top, the price row right under it with
- * the current price in green (the old one is grey and struck out), then «С банками»…
- * The name proper is further down, so the big headline printed on the photo stands in for it.
+ * A screenshot of a product page in a shop app → name and price. Ozon lets no outside reader at
+ * its pages, but the user can always screenshot what they are looking at.
+ * Ozon's product page: the photo card on top, the price row right under it with the current
+ * price in green (the old one is grey and struck out), then «С банками»… and, further down, the
+ * product's name in plain type. That name, when the screenshot shows it, reads almost without
+ * mistakes; otherwise the big headline printed on the photo stands in for it.
  */
 
 export type ShotStage = 'read';
 
 export interface ShotInfo {
-  /** The price row was found, so it is the Ozon product page. */
+  /** A shop screen was read: something like a name or a price came off it. */
+  screen: boolean;
+  /** The green price row of the Ozon app was found. */
   ozon: boolean;
   title?: string;
   price?: number;
@@ -112,6 +115,67 @@ export function mergeLines(passes: OcrLine[][]): OcrLine[] {
 }
 
 const UI_WORDS = /похожие|видео|в корзину|доставим|отзыв|купить|подробнее/i;
+
+/** Lines of the shop's own interface around the product: buttons, payment offers, delivery. */
+const PAGE_UI =
+  /банк|мили |постоплат|покупайте|подробнее|корзин|доставим|доставк|распродаж|отзыв|вопрос|оценк|рассрочк|кэшбэк|балл|продав|магазин|похож|характеристик|описани|наличии|осталось|купили|выбрат|ozon|озон|карт[аоуы]|скидк|акци|артикул|бренд|в избранн|поделит|сравнит|₽/i;
+
+const letters = (s: string) => (s.match(/[a-zа-яё]/gi) ?? []).length;
+
+/**
+ * The product's name among the page's plain text: the longest block of evenly sized,
+ * left-aligned lines that are words rather than buttons, prices or offers.
+ */
+export function nameFrom(lines: OcrLine[]): string | undefined {
+  const cand = lines
+    .map((l) => ({ ...l, text: l.text.replace(/[|_«»"“”]+/g, ' ').replace(/\s+/g, ' ').trim() }))
+    .filter((l) => {
+      const n = letters(l.text);
+      const chars = l.text.replace(/\s/g, '').length;
+      return l.confidence >= 55 && n >= 5 && n / chars >= 0.55 && l.text.split(' ').length >= 2 && !PAGE_UI.test(l.text);
+    })
+    .sort((a, b) => a.y - b.y);
+
+  const blocks: OcrLine[][] = [];
+  for (const l of cand) {
+    const block = blocks.at(-1);
+    const prev = block?.at(-1);
+    const joins = prev && Math.abs(l.size - prev.size) <= Math.max(l.size, prev.size) * 0.3 && l.y - (prev.y + prev.size) < prev.size * 1.1 && Math.abs(l.x0 - prev.x0) < prev.size * 1.5;
+    if (joins) block!.push(l);
+    else blocks.push([l]);
+  }
+  const best = blocks
+    .map((b) => ({ b, n: b.reduce((t, l) => t + letters(l.text), 0) }))
+    .filter((x) => x.n >= 12)
+    .sort((a, b) => b.n - a.n)[0];
+  if (!best) return undefined;
+  const text = best.b
+    .map((l) => l.text)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .replace(/[.,\-–—\s]+$/, '')
+    .trim();
+  return shortTitle(fixUnits(text), 70);
+}
+
+/** Read with Latin letters on, Russian units after a number come out Latin: «5 n» → «5 л». */
+const UNITS: Record<string, string> = { n: 'л', r: 'г', mn: 'мл', mл: 'мл', kr: 'кг', kг: 'кг', wt: 'шт', cm: 'см', mm: 'мм' };
+export function fixUnits(text: string): string {
+  if (!/[а-яё]/i.test(text)) return text;
+  return text.replace(/(\d)\s*([a-zл]{1,2})(?![a-zа-яё])/gi, (all, d: string, u: string) => {
+    const ru = UNITS[u.toLowerCase()];
+    return ru ? `${d} ${ru}` : all;
+  });
+}
+
+/** A price in the page text when there is no green price row: the biggest «12 990 ₽». */
+export function priceInLines(lines: OcrLine[]): number | undefined {
+  const found = lines
+    .map((l) => ({ l, m: l.text.match(/(\d{1,3}(?:[\s\u00a0\u202f]\d{3})+|\d+)\s*[₽Р]/) }))
+    .filter((x) => x.m)
+    .sort((a, b) => b.l.size - a.l.size)[0];
+  return found ? priceFrom(found.m![1]) : undefined;
+}
 
 /**
  * The headline printed on the photo: the line with big, surely read letters near the top, plus
@@ -232,37 +296,80 @@ async function linesOf(worker: Worker, c: HTMLCanvasElement, mode: PSM, scale: n
   );
 }
 
-let ocr: Promise<Worker> | null = null;
+const readers: { mixed?: Promise<Worker>; russian?: Promise<Worker> } = {};
 
-/**
- * The Russian OCR, started once and kept: loading it is a good part of the wait, so the form
- * calls this as soon as it opens and the screenshot then meets a ready reader.
- */
-export function warmOcr(): Promise<Worker> {
-  ocr ??= import('tesseract.js')
-    .then(({ createWorker }) => createWorker('rus', 1))
+function reader(slot: 'mixed' | 'russian', langs: string[]): Promise<Worker> {
+  readers[slot] ??= import('tesseract.js')
+    .then(({ createWorker }) => createWorker(langs, 1))
     .catch((e) => {
-      ocr = null;
+      delete readers[slot];
       throw e;
     });
-  return ocr;
+  return readers[slot];
+}
+
+/**
+ * The OCR, started once and kept: loading it is a good part of the wait, so the form calls
+ * this as soon as it opens and the screenshot then meets a ready reader. Two of them: page
+ * text needs English too (names mix in Latin brands, «Гель для душа GRASS Milana»), while the
+ * stylised poster lettering reads better with Russian alone.
+ */
+export function warmOcr(): Promise<[Worker, Worker]> {
+  return Promise.all([reader('mixed', ['rus', 'eng']), reader('russian', ['rus'])]);
+}
+
+/**
+ * The page's plain text below the photo, made easy for OCR: grey, dark letters on light (dark
+ * themes are inverted), half again as big.
+ */
+function pageCanvas(src: HTMLCanvasElement, px: Px, top: number, bottom: number) {
+  const k = 1.5;
+  const c = document.createElement('canvas');
+  c.width = Math.round(px.w * k);
+  c.height = Math.round((bottom - top) * k);
+  const x = c.getContext('2d', { willReadFrequently: true })!;
+  x.drawImage(src, 0, top, px.w, bottom - top, 0, 0, c.width, c.height);
+  const img = x.getImageData(0, 0, c.width, c.height);
+  const d = img.data;
+  let sum = 0;
+  for (let i = 0; i < d.length; i += 4) sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  const dark = sum / (d.length / 4) < 110;
+  for (let i = 0; i < d.length; i += 4) {
+    const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    const v = Math.max(0, Math.min(255, ((dark ? 255 - l : l) - 128) * 1.4 + 128));
+    d[i] = d[i + 1] = d[i + 2] = v;
+  }
+  x.putImageData(img, 0, 0);
+  return { c, k };
 }
 
 export async function readShot(file: Blob, onStage?: (stage: ShotStage, share: number) => void): Promise<ShotInfo> {
   onStage?.('read', 0);
-  const worker = warmOcr();
+  const workers = warmOcr();
   const { c, px } = await pixels(file);
   // A phone screen is tall; product photos are not, and their green bits are no price row.
-  if (px.h / px.w < 1.8) return { ozon: false };
+  if (px.h / px.w < 1.8) return { screen: false, ozon: false };
   const row = findPrice(px);
-  if (!row) return { ozon: false };
-  const card = findCard(px, row.top);
+  const card = row ? findCard(px, row.top) : null;
+
+  const [w, ru] = await workers;
+  let price: number | undefined;
+  if (row) {
+    await w.setParameters({ tessedit_pageseg_mode: SINGLE_LINE, tessedit_char_whitelist: '0123456789 ' });
+    price = priceFrom((await w.recognize(priceCanvas(px, row))).data.text);
+  }
+
+  // The name proper, when the screenshot shows it: plain text under the photo (or anywhere,
+  // once the photo has scrolled away), above the tab bar.
+  const top = card ? card.bottom : Math.round(px.h * 0.05);
+  const page = pageCanvas(c, px, top, Math.round(px.h * 0.92));
+  const pageLines = (await linesOf(w, page.c, AUTO, page.k)).map((l) => ({ ...l, y: l.y + top }));
+  const name = nameFrom(pageLines);
+  price ??= priceInLines(pageLines);
+  if (name || !card) return { screen: !!(name || price), ozon: !!row, title: name, price };
+
   const whole = cardCanvas(c, px.w, card);
   const head = cardCanvas(c, px.w, card, HEADLINE_SHARE);
-
-  const w = await worker;
-  await w.setParameters({ tessedit_pageseg_mode: SINGLE_LINE, tessedit_char_whitelist: '0123456789 ' });
-  const price = priceFrom((await w.recognize(priceCanvas(px, row))).data.text);
 
   // Poster lettering reads unevenly: a sparse pass at twice the size (over the headline part
   // only — it is the slow one) and a page pass over the whole card each catch lines the
@@ -271,9 +378,9 @@ export async function readShot(file: Blob, onStage?: (stage: ShotStage, share: n
   big.width = head.width * 2;
   big.height = head.height * 2;
   big.getContext('2d')!.drawImage(head, 0, 0, big.width, big.height);
-  const sparse = await linesOf(w, big, SPARSE_TEXT, 2);
-  const page = await linesOf(w, whole, AUTO, 1);
+  const sparse = await linesOf(ru, big, SPARSE_TEXT, 2);
+  const poster = await linesOf(ru, whole, AUTO, 1);
   // Scored against the whole card, as the lines' heights and places were tuned on it.
-  const title = titleFrom(mergeLines([sparse, page]), card.bottom - card.top);
-  return { ozon: true, title, price };
+  const title = titleFrom(mergeLines([sparse, poster]), card.bottom - card.top);
+  return { screen: true, ozon: true, title, price };
 }

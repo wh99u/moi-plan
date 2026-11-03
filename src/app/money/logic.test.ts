@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import type { Category, Spend, Sub } from '../../lib/types';
-import { byDay, dueLabel, report, subCategory, upcoming, wholeShares } from './logic';
+import type { Income, Spend, Sub } from '../../lib/types';
+import { dueLabel, monthStats, monthTxs, txDays, upcoming } from './logic';
 
 const sub = (id: string, next: string, extra: Partial<Sub> = {}): Sub => ({
   id,
@@ -13,7 +13,6 @@ const sub = (id: string, next: string, extra: Partial<Sub> = {}): Sub => ({
   catName: 'Связь',
   ...extra,
 });
-const cat = (id: string, name = id): Category => ({ id, name, icon: 'food', color: '#000', limit: 0 });
 const today = new Date(2026, 9, 28, 15);
 
 describe('upcoming payments', () => {
@@ -37,38 +36,53 @@ describe('upcoming payments', () => {
   });
 });
 
-describe('report', () => {
-  test('only categories with spending, biggest first, shares of the total', () => {
-    const rows = report([
-      { cat: cat('a'), spent: 100 },
-      { cat: cat('b'), spent: 0 },
-      { cat: cat('c'), spent: 300 },
-    ]);
-    expect(rows.map((r) => [r.cat.id, r.share])).toEqual([
-      ['c', 75],
-      ['a', 25],
+const inc = (id: string, date: string, amount: number, extra: Partial<Income> = {}): Income => ({ id, date, amount, bankId: 'b', source: 'manual', updatedAt: 0, ...extra });
+const out = (id: string, date: string, amount: number, extra: Partial<Spend> = {}): Spend => ({ id, ym: date.slice(0, 7), catId: '', date, amount, updatedAt: 0, ...extra });
+
+describe('month feed', () => {
+  test('income and spending of the month, newest first, deleted and other months left out', () => {
+    const list = monthTxs(
+      [inc('a', '2026-11-02', 100), inc('old', '2026-10-30', 5), inc('gone', '2026-11-03', 5, { deleted: true })],
+      [out('b', '2026-11-03', 40), out('c', '2026-11-01', 10), out('prev', '2026-10-31', 7)],
+      '2026-11',
+    );
+    expect(list.map((t) => [t.id, t.kind])).toEqual([
+      ['b', 'out'],
+      ['a', 'in'],
+      ['c', 'out'],
     ]);
   });
 
-  test('whole percents still add up to 100', () => {
-    expect(wholeShares([33.33, 33.33, 33.34])).toEqual([33, 33, 34]);
-    expect(wholeShares([62.5, 37.5]).reduce((t, x) => t + x, 0)).toBe(100);
+  test('the same day: the latest entry on top', () => {
+    const list = monthTxs([inc('a', '2026-11-02', 1, { updatedAt: 1 })], [out('b', '2026-11-02', 1, { updatedAt: 2 })], '2026-11');
+    expect(list.map((t) => t.id)).toEqual(['b', 'a']);
+  });
+
+  test('titles fall back and automatic entries are marked', () => {
+    const [a, b] = monthTxs([inc('a', '2026-11-02', 1, { source: 'shortcut' })], [out('b', '2026-11-01', 1, { note: 'Кофе' })], '2026-11');
+    expect([a.title, a.auto, b.title, b.auto]).toEqual(['Пополнение', true, 'Кофе', false]);
+  });
+
+  test('split by day', () => {
+    const list = monthTxs([], [out('a', '2026-11-03', 1), out('b', '2026-11-03', 1), out('c', '2026-11-01', 1)], '2026-11');
+    expect(txDays(list).map((d) => [d.date, d.list.length])).toEqual([
+      ['2026-11-03', 2],
+      ['2026-11-01', 1],
+    ]);
   });
 });
 
-test('spends grouped by day, newest first', () => {
-  const s = (id: string, date: string, amount: number, updatedAt: number, ym = date.slice(0, 7)): Spend => ({ id, ym, catId: 'c', amount, date, updatedAt });
-  const groups = byDay([s('a', '2026-10-01', 100, 1), s('b', '2026-10-03', 50, 2), s('c', '2026-10-03', 25, 3), s('d', '2026-09-30', 5, 4)], '2026-10');
-  expect(groups.map((g) => [g.date, g.total, g.list.map((x) => x.id)])).toEqual([
-    ['2026-10-03', 75, ['c', 'b']],
-    ['2026-10-01', 100, ['a']],
-  ]);
-});
+describe('month stats', () => {
+  const list = monthTxs([inc('a', '2026-11-02', 1000), inc('z', '2026-11-05', 200)], [out('b', '2026-11-03', 200)], '2026-11');
 
-test('a subscription falls back to «Связь», then the first category', () => {
-  const month = { id: 'm', ym: '2026-10', income: 0, updatedAt: 0, cats: [cat('1', 'Еда'), cat('2', 'Связь'), cat('3', 'Развлечения')] };
-  expect(subCategory(month, 'Развлечения')?.id).toBe('3');
-  expect(subCategory(month, 'Нет такой')?.id).toBe('2');
-  expect(subCategory({ ...month, cats: [cat('1', 'Еда')] }, 'Связь')?.id).toBe('1');
-  expect(subCategory(undefined, 'Связь')).toBeUndefined();
+  test('difference and its share of what there was before', () => {
+    expect(monthStats(list, 11000)).toMatchObject({ income: 1200, spent: 200, delta: 1000, pct: 10 });
+  });
+  test('the newest top-up', () => {
+    expect(monthStats(list, 11000).lastIn?.id).toBe('z');
+  });
+  test('no percent without a base or without a change', () => {
+    expect(monthStats(list, 1000).pct).toBeNull();
+    expect(monthStats([], 500)).toMatchObject({ delta: 0, pct: null, lastIn: null });
+  });
 });

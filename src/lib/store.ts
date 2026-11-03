@@ -200,6 +200,25 @@ export function createStore(storage: Storage, key: string, opts: StoreOptions = 
     deleteSpend(id: string) {
       shared({ spends: removeIn(state.shared.spends, id) });
     },
+    /** Money out of a card: logs a spend for today and lowers the card's sum. */
+    spendFrom(bankId: string, amount: number, extra: Pick<Spend, 'title' | 'auto'> = {}): Spend {
+      const date = dayKey(today());
+      const spend: Spend = stamp({ id: uid(), ym: date.slice(0, 7), catId: '', amount, date, bankId, ...extra });
+      shared({
+        banks: state.shared.banks.map((b) => (b.id === bankId ? { ...b, sum: b.sum - amount, updatedAt: Date.now() } : b)),
+        spends: [...state.shared.spends, spend],
+      });
+      return spend;
+    },
+    /** Undo of a spend: gives the money back to its card, if it has one, and tombstones it. */
+    revertSpend(id: string) {
+      const spend = state.shared.spends.find((x) => x.id === id && !x.deleted);
+      if (!spend) return;
+      shared({
+        banks: state.shared.banks.map((b) => (b.id === spend.bankId ? { ...b, sum: b.sum + spend.amount, updatedAt: Date.now() } : b)),
+        spends: removeIn(state.shared.spends, id),
+      });
+    },
     addSub(x: Omit<Sub, 'id' | 'updatedAt'>): Sub {
       const sub = stamp({ ...x, id: uid() });
       shared({ subs: [...state.shared.subs, sub] });

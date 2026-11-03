@@ -1,6 +1,7 @@
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import { useEffect, useRef } from 'react';
 import { Home } from './home/Home';
+import { takeBankLink } from './money/auto';
 import { MoneyPage } from './money/MoneyPage';
 import { Nav } from './Nav';
 import { tabIndex, useRoute } from './route';
@@ -20,6 +21,13 @@ export function App() {
     closeSheet();
     window.scrollTo({ top: 0 });
   }, [route]);
+
+  // A bank's message can arrive through a link, at start or while the app is open.
+  useEffect(() => {
+    takeBankLink();
+    addEventListener('hashchange', takeBankLink);
+    return () => removeEventListener('hashchange', takeBankLink);
+  }, []);
 
   return (
     <MotionConfig reducedMotion="user">

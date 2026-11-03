@@ -1,7 +1,7 @@
 import { daysBetween, parseDay } from '../../lib/dates';
 import { rub } from '../../lib/money';
 import { visible } from '../../lib/records';
-import type { BudgetMonth, Category, Spend, Sub } from '../../lib/types';
+import type { Income, Spend, Sub } from '../../lib/types';
 
 export type DueStatus = 'overdue' | 'today' | 'soon' | 'later';
 
@@ -37,79 +37,66 @@ export function dueLabel(d: number) {
   return `через ${days(d)}`;
 }
 
-export interface ReportRow {
-  cat: Category;
-  spent: number;
-  /** Share of everything spent this month, 0…100. */
-  share: number;
-}
-
-/** Where the money went: categories with spending, biggest first. */
-export function report(cats: { cat: Category; spent: number }[]): ReportRow[] {
-  const total = cats.reduce((t, c) => t + c.spent, 0);
-  return cats
-    .filter((c) => c.spent > 0)
-    .map((c) => ({ cat: c.cat, spent: c.spent, share: total ? (c.spent / total) * 100 : 0 }))
-    .sort((a, b) => b.spent - a.spent);
-}
-
-/** Rounds shares to whole percents that still add up to 100 (largest remainder). */
-export function wholeShares(shares: number[]): number[] {
-  const floor = shares.map(Math.floor);
-  let left = Math.round(shares.reduce((t, s) => t + s, 0)) - floor.reduce((t, s) => t + s, 0);
-  const order = shares.map((s, i) => [s - Math.floor(s), i] as const).sort((a, b) => b[0] - a[0]);
-  for (const [, i] of order) {
-    if (left <= 0) break;
-    floor[i]++;
-    left--;
-  }
-  return floor;
-}
-
-export interface DayGroup {
-  date: string;
-  total: number;
-  list: Spend[];
-}
-
-/** A month's spends by day, newest day first and newest entry first within it. */
-export function byDay(spends: Spend[], ym: string): DayGroup[] {
-  const map = new Map<string, Spend[]>();
-  for (const s of visible(spends)) {
-    if (s.ym !== ym) continue;
-    const list = map.get(s.date) ?? [];
-    list.push(s);
-    map.set(s.date, list);
-  }
-  return [...map.entries()]
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([date, list]) => ({ date, total: list.reduce((t, s) => t + s.amount, 0), list: list.sort((a, b) => b.updatedAt - a.updatedAt) }));
-}
-
-/** The category a subscription is paid from this month: by name, else «Связь», else the first. */
-export function subCategory(month: BudgetMonth | undefined, catName: string): Category | undefined {
-  const cats = month?.cats ?? [];
-  return cats.find((c) => c.name === catName) ?? cats.find((c) => c.name === 'Связь') ?? cats[0];
-}
-
-/** One-tap starting points for the usual monthly payments. */
-export const SUB_PRESETS: { name: string; icon: string; amount: number; catName: string }[] = [
-  { name: 'Мобильная связь', icon: 'phone', amount: 500, catName: 'Связь' },
-  { name: 'Интернет', icon: 'wifi', amount: 650, catName: 'Связь' },
-  { name: 'Яндекс Плюс', icon: 'sparkle', amount: 399, catName: 'Развлечения' },
-  { name: 'Кинопоиск', icon: 'tv', amount: 299, catName: 'Развлечения' },
-  { name: 'Музыка', icon: 'headphones', amount: 199, catName: 'Развлечения' },
-  { name: 'Облако', icon: 'cloud', amount: 149, catName: 'Связь' },
-];
-
-/** Categories in the order the report shows them; each gets a tone from our palette. */
-export const CAT_TONES = ['#e8435c', '#f39a8a', '#f6c6a5', '#c98bb0', '#8c5a8f', '#d9b48c', '#b8768a', '#efa3b3'];
-
 /** Whole roubles as «5 000 ₽», kopecks only when there are any: «89,99 ₽». */
 export function money(n: number) {
   if (Number.isInteger(Math.round(n * 100) / 100)) return rub(n);
   return `${n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/\s/g, ' ')} ₽`;
 }
 
-/** Sum of receipt lines, kept to kopecks. */
-export const itemsTotal = (items: { price: number }[]) => Math.round(items.reduce((t, x) => t + (x.price || 0), 0) * 100) / 100;
+/** One line of the feed: money that came in or went out. */
+export interface Tx {
+  id: string;
+  kind: 'in' | 'out';
+  amount: number;
+  date: string;
+  title: string;
+  bankId?: string;
+  /** Added by itself from a bank's message, not typed by hand. */
+  auto: boolean;
+  updatedAt: number;
+}
+
+/** Everything that happened in a month, newest first. */
+export function monthTxs(incomes: Income[], spends: Spend[], ym: string): Tx[] {
+  const inn: Tx[] = visible(incomes)
+    .filter((x) => x.date.startsWith(ym))
+    .map((x) => ({ id: x.id, kind: 'in', amount: x.amount, date: x.date, title: x.note || 'Пополнение', bankId: x.bankId, auto: x.source === 'shortcut', updatedAt: x.updatedAt }));
+  const out: Tx[] = visible(spends)
+    .filter((x) => x.ym === ym)
+    .map((x) => ({ id: x.id, kind: 'out', amount: x.amount, date: x.date, title: x.title || x.note || 'Трата', bankId: x.bankId, auto: !!x.auto, updatedAt: x.updatedAt }));
+  return [...inn, ...out].sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt - a.updatedAt);
+}
+
+export interface TxDay {
+  date: string;
+  list: Tx[];
+}
+
+/** Feed split by day; the order inside `txs` is kept. */
+export function txDays(txs: Tx[]): TxDay[] {
+  const days: TxDay[] = [];
+  for (const t of txs) {
+    const day = days[days.length - 1];
+    if (day?.date === t.date) day.list.push(t);
+    else days.push({ date: t.date, list: [t] });
+  }
+  return days;
+}
+
+export interface MonthStats {
+  income: number;
+  spent: number;
+  /** Income minus spending. */
+  delta: number;
+  /** The delta as a share of what there was before it; null when there was nothing to compare with. */
+  pct: number | null;
+  lastIn: Tx | null;
+}
+
+export function monthStats(txs: Tx[], balance: number): MonthStats {
+  const income = txs.filter((t) => t.kind === 'in').reduce((s, t) => s + t.amount, 0);
+  const spent = txs.filter((t) => t.kind === 'out').reduce((s, t) => s + t.amount, 0);
+  const delta = income - spent;
+  const before = balance - delta;
+  return { income, spent, delta, pct: before > 0 && delta ? (delta / before) * 100 : null, lastIn: txs.find((t) => t.kind === 'in') ?? null };
+}

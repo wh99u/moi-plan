@@ -38,6 +38,8 @@ export interface Car {
   imgId?: string;
   /** The photo is a cut-out on a transparent background. */
   cut?: boolean;
+  /** The picture is a white line icon rather than a photo. */
+  icon?: boolean;
   /** Already put aside for it. */
   saved?: number;
   url?: string;
@@ -52,6 +54,8 @@ export interface Buy extends Rec {
   tint?: string;
   /** The photo is a cut-out on a transparent background. */
   cut?: boolean;
+  /** The picture is a white line icon rather than a photo. */
+  icon?: boolean;
   /** Small line above the name: «Чехлы для телефонов». */
   category?: string;
   /** One line about it, shown on its page: «Газированный напиток в банке 0,33 л». */
@@ -96,6 +100,10 @@ export interface Spend extends Rec {
   items?: SpendItem[];
   /** Set when the spend is a paid subscription. */
   subId?: string;
+  /** The card it was paid from; its sum went down with this spend. */
+  bankId?: string;
+  /** Added by itself from a bank's message. */
+  auto?: boolean;
 }
 
 export type SubPeriod = 'month' | 'year';

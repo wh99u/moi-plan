@@ -76,6 +76,26 @@ describe('cards and money', () => {
     expect(s.personal.settings.lastTopUpBankId).toBe(bank.id);
   });
 
+  test('spendFrom lowers the card and logs a spend; revertSpend gives it back', () => {
+    const store = fresh();
+    const bank = store.actions.addBank('tbank', 1000);
+    const spend = store.actions.spendFrom(bank.id, 300, { title: 'Кофе', auto: true });
+    expect(store.get().shared.banks[0].sum).toBe(700);
+    expect(spend).toMatchObject({ amount: 300, bankId: bank.id, title: 'Кофе', auto: true, date: '2026-10-17', ym: '2026-10' });
+    store.actions.revertSpend(spend.id);
+    expect(store.get().shared.banks[0].sum).toBe(1000);
+    expect(visible(store.get().shared.spends)).toEqual([]);
+  });
+
+  test('revertSpend leaves cards alone for a spend without a card', () => {
+    const store = fresh();
+    store.actions.addBank('tbank', 1000);
+    const spend = store.actions.addSpend({ ym: '2026-10', catId: 'c', amount: 300, date: '2026-10-17' });
+    store.actions.revertSpend(spend.id);
+    expect(store.get().shared.banks[0].sum).toBe(1000);
+    expect(visible(store.get().shared.spends)).toEqual([]);
+  });
+
   test('transfer moves money and refuses to overdraw', () => {
     const store = fresh();
     const a = store.actions.addBank('tbank', 1000);

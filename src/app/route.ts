@@ -14,7 +14,7 @@ export interface Section {
 /** Bottom bar, left to right. */
 export const TABS: Section[] = [
   { id: 'home', label: 'Главная', icon: 'home', hint: '' },
-  { id: 'money', label: 'Траты', icon: 'wallet', hint: 'Траты за месяц и общий бюджет' },
+  { id: 'money', label: 'Бюджет', icon: 'wallet', hint: 'Деньги на картах и операции за месяц' },
   { id: 'wishes', label: 'Желания', icon: 'heart', hint: 'Машина мечты и список желаний' },
   { id: 'tasks', label: 'Задачи', icon: 'calendar', hint: 'Календарь задач и смен' },
 ];

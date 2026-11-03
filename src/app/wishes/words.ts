@@ -1,18 +1,7 @@
 /*
- * A 3D picture of the product without any AI: the name goes to English (MyMemory, a free
- * translator, with a small dictionary behind it), then Sketchfab — the big public library of
- * 3D models — is searched and each model's studio render serves as the product picture.
- * Both services answer browsers directly, need no key and work without VPN.
+ * A product name turned into English search words for the icon library: MyMemory, a free
+ * translator that answers browsers directly, with a small dictionary of common goods behind it.
  */
-
-export interface Model3d {
-  id: string;
-  name: string;
-  /** Small render for the picker grid. */
-  thumb: string;
-  /** Larger render to cut the product out of. */
-  big: string;
-}
 
 /** Sizes, volumes and counts only confuse the search: «Гель для душа 5 л» → «Гель для душа». */
 export function cleanQuery(title: string): string {
@@ -70,32 +59,12 @@ export async function toEnglish(text: string, signal?: AbortSignal): Promise<str
   return translateByDict(q) || q;
 }
 
-interface SketchfabImage {
-  url: string;
-  width: number;
-}
-interface SketchfabSearch {
-  results?: { uid: string; name: string; thumbnails?: { images?: SketchfabImage[] } }[];
-}
-
-/** Sketchfab's answer → models with a grid-sized and a cut-sized render. */
-export function toModels(json: SketchfabSearch): Model3d[] {
-  return (json.results ?? []).flatMap((m) => {
-    const imgs = [...(m.thumbnails?.images ?? [])].sort((a, b) => a.width - b.width);
-    const thumb = imgs.find((i) => i.width >= 200) ?? imgs.at(-1);
-    const big = [...imgs].reverse().find((i) => i.width <= 1024) ?? imgs[0];
-    return thumb && big ? [{ id: m.uid, name: m.name, thumb: thumb.url, big: big.url }] : [];
-  });
-}
-
-const SEARCH = 'https://api.sketchfab.com/v3/search';
 const FILLER = new Set(['a', 'an', 'the', 'for', 'with', 'and', 'of', 'in', 'on', 'to', 'by', 'from', 'set', 'scent', 'flavor', 'flavour', 'new', 'original', 'pcs', 'pack']);
 
 /**
- * Sketchfab wants every word to match, so a long name finds nothing. Simpler and simpler
- * queries are tried: the whole phrase, then shorter from the end, then its last two words
- * («vacuum cleaner»), then the head word (English puts it last in «shoe deodorant»), then
- * each word alone.
+ * A long name finds nothing when every word must match, so simpler and simpler queries are
+ * tried: the whole phrase, then shorter from the end, then its last two words («vacuum
+ * cleaner»), then the head word (English puts it last in «shoe deodorant»), then each word alone.
  */
 export function fallbacks(query: string): string[] {
   const words = query.toLowerCase().split(/\s+/).filter((w) => w && !FILLER.has(w));
@@ -106,29 +75,4 @@ export function fallbacks(query: string): string[] {
   out.push(...words.slice(2));
   if (words.length === 1) out.push(words[0]);
   return [...new Set(out)];
-}
-
-async function searchOnce(query: string, signal?: AbortSignal): Promise<Model3d[]> {
-  const res = await fetch(`${SEARCH}?type=models&count=12&q=${encodeURIComponent(query)}`, { signal });
-  if (!res.ok) throw new Error(String(res.status));
-  return toModels((await res.json()) as SketchfabSearch);
-}
-
-/** The first of the simpler queries that finds models, and what it found. */
-export async function searchModels(query: string, signal?: AbortSignal): Promise<{ query: string; models: Model3d[] }> {
-  for (const q of fallbacks(query)) {
-    const models = await searchOnce(q, signal);
-    if (models.length) return { query: q, models };
-  }
-  return { query, models: [] };
-}
-
-/**
- * The render's bytes. Bypasses the HTTP cache on purpose: the picker grid shows the same files
- * through <img>, and a copy cached that way may lack the header that lets a page read pixels.
- */
-export async function fetchRender(model: Model3d, signal?: AbortSignal): Promise<Blob> {
-  const res = await fetch(model.big, { cache: 'reload', signal });
-  if (!res.ok) throw new Error(String(res.status));
-  return res.blob();
 }

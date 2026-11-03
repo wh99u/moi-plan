@@ -1,10 +1,6 @@
 import { motion } from 'motion/react';
 import { useId, type ReactNode } from 'react';
-import { rub } from '../lib/money';
 import { haptic } from '../lib/telegram';
-import { BANK_NAMES, type Bank } from '../lib/types';
-import { BANK_THEME } from '../screens/budget/BankCard';
-import { cx } from './cx';
 import { springs } from './motion';
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -33,29 +29,6 @@ export function Seg<T extends string>({ value, options, onChange }: { value: T; 
         >
           {o.id === value && <motion.i className="seg-drop" layoutId={`seg-${group}`} transition={springs.snappy} />}
           <span>{o.label}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** Horizontal chips to pick one of the cards. */
-export function BankChips({ banks, value, onChange, showSum = true }: { banks: Bank[]; value?: string; onChange: (id: string) => void; showSum?: boolean }) {
-  return (
-    <div className="chips">
-      {banks.map((b) => (
-        <button
-          key={b.id}
-          type="button"
-          className={cx('chip', b.id === value && 'chip--on')}
-          onClick={() => {
-            haptic('selection');
-            onChange(b.id);
-          }}
-        >
-          <i className="chip-swatch" style={{ background: BANK_THEME[b.code].bg }} />
-          {BANK_NAMES[b.code]}
-          {showSum && <span className="chip-sum">{rub(b.sum)}</span>}
         </button>
       ))}
     </div>
