@@ -121,8 +121,8 @@ export function createStore(storage: Storage, key: string, opts: StoreOptions = 
     deleteBank(id: string) {
       shared({ banks: removeIn(state.shared.banks, id) });
     },
-    topUp(bankId: string, amount: number, source: Income['source'], note?: string): Income {
-      const income: Income = stamp({ id: uid(), date: dayKey(today()), amount, bankId, source, ...(note ? { note } : {}) });
+    topUp(bankId: string, amount: number, source: Income['source'], note?: string, date = dayKey(today())): Income {
+      const income: Income = stamp({ id: uid(), date, amount, bankId, source, ...(note ? { note } : {}) });
       set({
         ...state,
         shared: {
@@ -200,9 +200,8 @@ export function createStore(storage: Storage, key: string, opts: StoreOptions = 
     deleteSpend(id: string) {
       shared({ spends: removeIn(state.shared.spends, id) });
     },
-    /** Money out of a card: logs a spend for today and lowers the card's sum. */
-    spendFrom(bankId: string, amount: number, extra: Pick<Spend, 'title' | 'auto'> = {}): Spend {
-      const date = dayKey(today());
+    /** Money out of a card: logs a spend, for today unless told otherwise, and lowers the card's sum. */
+    spendFrom(bankId: string, amount: number, extra: Pick<Spend, 'title' | 'auto' | 'items'> = {}, date = dayKey(today())): Spend {
       const spend: Spend = stamp({ id: uid(), ym: date.slice(0, 7), catId: '', amount, date, bankId, ...extra });
       shared({
         banks: state.shared.banks.map((b) => (b.id === bankId ? { ...b, sum: b.sum - amount, updatedAt: Date.now() } : b)),

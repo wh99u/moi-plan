@@ -84,5 +84,6 @@ describe('month stats', () => {
   test('no percent without a base or without a change', () => {
     expect(monthStats(list, 1000).pct).toBeNull();
     expect(monthStats([], 500)).toMatchObject({ delta: 0, pct: null, lastIn: null });
+    expect(monthStats(list, null)).toMatchObject({ delta: 1000, pct: null });
   });
 });

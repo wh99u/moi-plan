@@ -53,6 +53,8 @@ export interface Tx {
   bankId?: string;
   /** Added by itself from a bank's message, not typed by hand. */
   auto: boolean;
+  /** Lines of its receipt. */
+  lines: number;
   updatedAt: number;
 }
 
@@ -60,10 +62,10 @@ export interface Tx {
 export function monthTxs(incomes: Income[], spends: Spend[], ym: string): Tx[] {
   const inn: Tx[] = visible(incomes)
     .filter((x) => x.date.startsWith(ym))
-    .map((x) => ({ id: x.id, kind: 'in', amount: x.amount, date: x.date, title: x.note || 'Пополнение', bankId: x.bankId, auto: x.source === 'shortcut', updatedAt: x.updatedAt }));
+    .map((x) => ({ id: x.id, kind: 'in', amount: x.amount, date: x.date, title: x.note || 'Пополнение', bankId: x.bankId, auto: x.source === 'shortcut', lines: 0, updatedAt: x.updatedAt }));
   const out: Tx[] = visible(spends)
     .filter((x) => x.ym === ym)
-    .map((x) => ({ id: x.id, kind: 'out', amount: x.amount, date: x.date, title: x.title || x.note || 'Трата', bankId: x.bankId, auto: !!x.auto, updatedAt: x.updatedAt }));
+    .map((x) => ({ id: x.id, kind: 'out', amount: x.amount, date: x.date, title: x.title || x.note || 'Трата', bankId: x.bankId, auto: !!x.auto, lines: x.items?.length ?? 0, updatedAt: x.updatedAt }));
   return [...inn, ...out].sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt - a.updatedAt);
 }
 
@@ -88,15 +90,16 @@ export interface MonthStats {
   spent: number;
   /** Income minus spending. */
   delta: number;
-  /** The delta as a share of what there was before it; null when there was nothing to compare with. */
+  /** The delta as a share of what there was before it; null when there is nothing to compare with. */
   pct: number | null;
   lastIn: Tx | null;
 }
 
-export function monthStats(txs: Tx[], balance: number): MonthStats {
+/** `balance` is the money today; a past month passes null, its percent can't be known. */
+export function monthStats(txs: Tx[], balance: number | null): MonthStats {
   const income = txs.filter((t) => t.kind === 'in').reduce((s, t) => s + t.amount, 0);
   const spent = txs.filter((t) => t.kind === 'out').reduce((s, t) => s + t.amount, 0);
   const delta = income - spent;
-  const before = balance - delta;
+  const before = balance === null ? 0 : balance - delta;
   return { income, spent, delta, pct: before > 0 && delta ? (delta / before) * 100 : null, lastIn: txs.find((t) => t.kind === 'in') ?? null };
 }

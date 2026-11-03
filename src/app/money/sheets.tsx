@@ -1,20 +1,24 @@
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { actions, appStore, useStore } from '../../lib/appStore';
-import { fmtDay } from '../../lib/dates';
+import { actions, useStore } from '../../lib/appStore';
+import { dayKey, daysInMonth, fmtDay, ymKey } from '../../lib/dates';
 import { visible } from '../../lib/records';
-import { BANK_CODES, BANK_NAMES, type BankCode } from '../../lib/types';
+import type { SpendItem } from '../../lib/types';
 import { Icon } from '../../ui/Icon';
 import { closeSheet, useSheet, useSheetData } from '../sheet';
 import { Segmented } from '../ui/Segmented';
 import { Sheet } from '../ui/Sheet';
+import { accountId, balance, setBalance } from './account';
 import { ingestBankMessage, noticeOf, setNotice } from './auto';
 import { parseBankMessage } from './bankText';
 import { money } from './logic';
+import type { ParsedReceipt } from './receipt';
+import { pickReceipt, scanReceipt, type ScanStage } from './scan';
 
 /** «1 234,5» → 1234.5; empty or junk → 0. */
 const num = (s: string) => Number(s.replace(/\s/g, '').replace(',', '.')) || 0;
 const show = (n: number) => String(Math.round(n * 100) / 100).replace('.', ',');
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export function MoneySheets() {
   const kind = useSheet();
@@ -22,13 +26,13 @@ export function MoneySheets() {
   return (
     <>
       <Sheet open={kind === 'tx'} onClose={closeSheet} title="Новая операция">
-        <TxForm />
+        <TxForm ym={data.ym ?? ymKey(new Date())} />
       </Sheet>
       <Sheet open={kind === 'txView'} onClose={closeSheet} title="Операция">
         {data.id && <TxView id={data.id} kind={data.tx ?? 'out'} />}
       </Sheet>
-      <Sheet open={kind === 'card'} onClose={closeSheet} title={data.id ? 'Карта' : 'Новая карта'}>
-        <CardForm key={data.id ?? 'new'} id={data.id} />
+      <Sheet open={kind === 'card'} onClose={closeSheet} title="Сумма на счёте">
+        <BalanceForm />
       </Sheet>
       <Sheet open={kind === 'auto'} onClose={closeSheet} title="Автодобавление">
         <AutoView />
@@ -37,28 +41,114 @@ export function MoneySheets() {
   );
 }
 
-function Chips<T extends string>({ value, options, onChange, label }: { value: T; options: { id: T; label: string }[]; onChange: (v: T) => void; label: string }) {
+/* ───────── receipt by photo ───────── */
+
+interface Line {
+  key: number;
+  name: string;
+  price: string;
+}
+let lineKey = 0;
+const toLines = (items: SpendItem[] = []): Line[] => items.map((x) => ({ key: ++lineKey, name: x.name, price: show(x.price) }));
+const toItems = (lines: Line[]): SpendItem[] => lines.filter((l) => l.name.trim() || num(l.price)).map((l) => ({ name: l.name.trim() || 'Позиция', price: num(l.price) }));
+const itemsSum = (items: SpendItem[]) => round2(items.reduce((t, x) => t + x.price, 0));
+
+const STAGE: Record<ScanStage, string> = {
+  prepare: 'Готовлю фото',
+  qr: 'Ищу QR-код чека',
+  model: 'Загружаю распознавание',
+  text: 'Читаю позиции',
+  done: 'Готово',
+};
+
+function useReceiptScan(onResult: (r: ParsedReceipt) => void) {
+  const [progress, setProgress] = useState<{ stage: ScanStage; share: number } | null>(null);
+  const [note, setNote] = useState('');
+
+  const start = () => {
+    // The picker opens only straight from a tap.
+    void pickReceipt().then(async (file) => {
+      if (!file) return;
+      setNote('');
+      setProgress({ stage: 'prepare', share: 0 });
+      try {
+        const r = await scanReceipt(file, (stage, share) => setProgress({ stage, share }));
+        if (r.items.length || r.total) {
+          onResult(r);
+          setNote('Проверь позиции: распознавание иногда ошибается');
+        } else {
+          setNote('Не получилось прочитать чек. Сфотографируй ровнее и при хорошем свете');
+        }
+      } catch {
+        setNote('Не удалось распознать чек: нет связи или фото не открылось');
+      } finally {
+        setProgress(null);
+      }
+    });
+  };
+  return { start, progress, note };
+}
+
+function ScanButton({ scan, label }: { scan: ReturnType<typeof useReceiptScan>; label: string }) {
   return (
-    <div className="b-chips" role="group" aria-label={label}>
-      {options.map((o) => (
-        <button key={o.id} type="button" className={`b-chip t-caption${o.id === value ? ' is-on' : ''}`} aria-pressed={o.id === value} onClick={() => onChange(o.id)}>
-          {o.label}
-        </button>
+    <>
+      {scan.progress ? (
+        <div className="b-scan" role="status">
+          <span className="t-caption muted">{STAGE[scan.progress.stage]}</span>
+          <span className="b-scan-bar">
+            <motion.span className="b-scan-fill" animate={{ scaleX: Math.max(0.04, scan.progress.share) }} transition={{ duration: 0.3 }} />
+          </span>
+        </div>
+      ) : (
+        <motion.button type="button" className="ghost-btn b-scan-btn" onClick={scan.start} whileTap={{ scale: 0.96 }}>
+          <Icon name="scan" size={18} />
+          {label}
+        </motion.button>
+      )}
+      {scan.note && <p className="t-caption muted">{scan.note}</p>}
+    </>
+  );
+}
+
+function LinesEditor({ lines, onChange }: { lines: Line[]; onChange: (lines: Line[]) => void }) {
+  const patch = (key: number, p: Partial<Line>) => onChange(lines.map((l) => (l.key === key ? { ...l, ...p } : l)));
+  return (
+    <div className="b-lines">
+      {lines.map((l) => (
+        <div key={l.key} className="b-line">
+          <input className="field b-line-field" value={l.name} onChange={(e) => patch(l.key, { name: e.target.value })} placeholder="Название" aria-label="Название позиции" maxLength={80} />
+          <input className="field b-line-field b-line-price" inputMode="decimal" value={l.price} onChange={(e) => patch(l.key, { price: e.target.value })} placeholder="₽" aria-label="Цена" />
+          <button type="button" className="b-line-del" aria-label={`Убрать позицию ${l.name}`} onClick={() => onChange(lines.filter((x) => x.key !== l.key))}>
+            <Icon name="close" size={16} />
+          </button>
+        </div>
       ))}
+      <button type="button" className="b-link t-caption b-line-add" onClick={() => onChange([...lines, { key: ++lineKey, name: '', price: '' }])}>
+        Добавить позицию
+      </button>
     </div>
   );
 }
 
 /* ───────── new operation ───────── */
 
-function TxForm() {
-  const banks = useStore((s) => visible(s.shared.banks)).sort((a, b) => a.order - b.order);
-  const last = useStore((s) => s.personal.settings.lastTopUpBankId);
+function TxForm({ ym }: { ym: string }) {
+  const today = dayKey(new Date());
   const [kind, setKind] = useState<'out' | 'in'>('out');
   const [amount, setAmount] = useState('');
   const [title, setTitle] = useState('');
-  const [bankId, setBankId] = useState(banks.find((b) => b.id === last)?.id ?? banks[0]?.id ?? '');
+  const [date, setDate] = useState(ym === today.slice(0, 7) ? today : `${ym}-${String(daysInMonth(ym)).padStart(2, '0')}`);
+  const [lines, setLines] = useState<Line[]>([]);
   const input = useRef<HTMLInputElement>(null);
+
+  const scan = useReceiptScan((r) => {
+    setKind('out');
+    if (r.store) setTitle(r.store);
+    setLines(toLines(r.items));
+    const total = r.total ?? itemsSum(r.items);
+    if (total) setAmount(show(total));
+    if (r.date) setDate(r.date);
+  });
 
   useEffect(() => {
     const t = setTimeout(() => input.current?.focus(), 380);
@@ -68,10 +158,15 @@ function TxForm() {
   const n = num(amount);
   const save = (e: FormEvent) => {
     e.preventDefault();
-    if (!n || !bankId) return;
+    if (!n) return;
     const t = title.trim();
-    if (kind === 'out') actions.spendFrom(bankId, n, t ? { title: t } : {});
-    else actions.topUp(bankId, n, 'manual', t || undefined);
+    const day = date || today;
+    if (kind === 'out') {
+      const items = toItems(lines);
+      actions.spendFrom(accountId(), n, { ...(t ? { title: t } : {}), ...(items.length ? { items } : {}) }, day);
+    } else {
+      actions.topUp(accountId(), n, 'manual', t || undefined, day);
+    }
     closeSheet();
   };
 
@@ -86,9 +181,11 @@ function TxForm() {
         ]}
         name="tx-kind"
       />
-      <input ref={input} className="field t-headline" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Сумма, ₽" aria-label="Сумма" />
+      {kind === 'out' && <ScanButton scan={scan} label="Сфотографировать чек" />}
+      <input ref={input} className="field" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Сумма, ₽" aria-label="Сумма" />
       <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={kind === 'out' ? 'На что' : 'От кого'} aria-label="Название" maxLength={60} />
-      {banks.length > 1 && <Chips label="Карта" value={bankId} onChange={setBankId} options={banks.map((b) => ({ id: b.id, label: BANK_NAMES[b.code] }))} />}
+      <input className="field" type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Дата" />
+      {kind === 'out' && lines.length > 0 && <LinesEditor lines={lines} onChange={setLines} />}
       <motion.button type="submit" className="primary-btn" disabled={!n} whileTap={{ scale: 0.96 }}>
         Добавить
       </motion.button>
@@ -101,17 +198,26 @@ function TxForm() {
 function TxView({ id, kind }: { id: string; kind: 'in' | 'out' }) {
   const income = useStore((s) => (kind === 'in' ? visible(s.shared.incomes).find((x) => x.id === id) : undefined));
   const spend = useStore((s) => (kind === 'out' ? visible(s.shared.spends).find((x) => x.id === id) : undefined));
-  const banks = useStore((s) => visible(s.shared.banks));
+  const [draft, setDraft] = useState<Line[] | null>(null);
+  const scan = useReceiptScan((r) => {
+    setDraft(toLines(r.items));
+    if (spend && r.store && !spend.title) actions.updateSpend(spend.id, { title: r.store });
+  });
   const rec = income ?? spend;
   if (!rec) return null;
 
-  const bank = banks.find((b) => b.id === rec.bankId);
   const title = income ? income.note || 'Пополнение' : spend?.title || spend?.note || 'Трата';
   const auto = income ? income.source === 'shortcut' : !!spend?.auto;
+  const moves = kind === 'in' || !!spend?.bankId;
+  const items = spend?.items ?? [];
   const remove = () => {
     if (kind === 'in') actions.revertTopUp(id);
     else actions.revertSpend(id);
     closeSheet();
+  };
+  const saveReceipt = () => {
+    actions.updateSpend(id, { items: toItems(draft ?? []) });
+    setDraft(null);
   };
 
   return (
@@ -123,53 +229,77 @@ function TxView({ id, kind }: { id: string; kind: 'in' | 'out' }) {
       <p className="t-headline">{title}</p>
       <p className="t-body muted">
         {fmtDay(rec.date, true)}
-        {bank ? `, ${BANK_NAMES[bank.code]}` : ''}
         {auto ? ', добавлено само' : ''}
       </p>
+
+      {kind === 'out' &&
+        (draft ? (
+          <>
+            <h3 className="t-headline b-auto-head">Чек</h3>
+            <LinesEditor lines={draft} onChange={setDraft} />
+            {scan.note && <p className="t-caption muted">{scan.note}</p>}
+            <motion.button type="button" className="primary-btn" onClick={saveReceipt} whileTap={{ scale: 0.96 }}>
+              Сохранить чек
+            </motion.button>
+          </>
+        ) : (
+          <>
+            {items.length > 0 && <Receipt items={items} amount={rec.amount} onEdit={() => setDraft(toLines(items))} />}
+            <ScanButton scan={scan} label={items.length ? 'Заменить чек по фото' : 'Добавить чек по фото'} />
+          </>
+        ))}
+
       <motion.button type="button" className="ghost-btn" onClick={remove} whileTap={{ scale: 0.96 }}>
         <Icon name="trash" size={18} />
         Удалить операцию
       </motion.button>
-      {bank && <p className="t-caption muted">Сумма {kind === 'in' ? 'спишется с карты' : 'вернётся на карту'}.</p>}
+      {moves && <p className="t-caption muted">Сумма {kind === 'in' ? 'спишется со счёта' : 'вернётся на счёт'}.</p>}
     </div>
   );
 }
 
-/* ───────── a card ───────── */
+function Receipt({ items, amount, onEdit }: { items: SpendItem[]; amount: number; onEdit: () => void }) {
+  const sum = itemsSum(items);
+  return (
+    <section className="b-receipt" aria-label="Чек">
+      <div className="b-receipt-head">
+        <h3 className="t-headline">Чек</h3>
+        <button type="button" className="b-link t-caption" onClick={onEdit}>
+          Изменить
+        </button>
+      </div>
+      <ul className="b-receipt-list">
+        {items.map((x, i) => (
+          <li key={i} className="t-body">
+            <span>{x.name}</span>
+            <span className="t-num">{money(x.price)}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="b-receipt-total t-headline">
+        <span>Итого</span>
+        <span className="t-num">{money(sum)}</span>
+      </div>
+      {sum !== round2(amount) && <p className="t-caption muted">Сумма операции другая: {money(amount)}. Возможно, скидка или ошибка распознавания.</p>}
+    </section>
+  );
+}
 
-function CardForm({ id }: { id?: string }) {
-  const bank = id ? visible(appStore.get().shared.banks).find((b) => b.id === id) : undefined;
-  const [code, setCode] = useState<BankCode>(bank?.code ?? 'tbank');
-  const [sum, setSum] = useState(bank ? show(bank.sum) : '');
+/* ───────── how much there is ───────── */
 
+function BalanceForm() {
+  const [sum, setSum] = useState(() => show(balance()));
   const save = (e: FormEvent) => {
     e.preventDefault();
-    if (bank) actions.updateBank(bank.id, { code, sum: num(sum) });
-    else actions.addBank(code, num(sum));
+    setBalance(num(sum));
     closeSheet();
   };
-
   return (
     <form className="form" onSubmit={save}>
-      <Chips label="Банк" value={code} onChange={setCode} options={BANK_CODES.map((c) => ({ id: c, label: BANK_NAMES[c] }))} />
-      <input className="field t-headline" inputMode="decimal" value={sum} onChange={(e) => setSum(e.target.value)} placeholder="Сколько на ней сейчас, ₽" aria-label="Остаток на карте" />
+      <input className="field" inputMode="decimal" value={sum} onChange={(e) => setSum(e.target.value)} placeholder="Сколько сейчас на счёте, ₽" aria-label="Сумма на счёте" />
       <motion.button type="submit" className="primary-btn" whileTap={{ scale: 0.96 }}>
-        {bank ? 'Сохранить' : 'Добавить карту'}
+        Сохранить
       </motion.button>
-      {bank && (
-        <motion.button
-          type="button"
-          className="ghost-btn"
-          onClick={() => {
-            actions.deleteBank(bank.id);
-            closeSheet();
-          }}
-          whileTap={{ scale: 0.96 }}
-        >
-          <Icon name="trash" size={18} />
-          Удалить карту
-        </motion.button>
-      )}
     </form>
   );
 }
@@ -181,7 +311,7 @@ function describe(text: string) {
   if (!m) return 'Пока не вижу здесь операцию';
   const parts = [`${m.kind === 'in' ? 'Пополнение' : 'Расход'} ${money(m.amount)}`];
   if (m.title) parts.push(m.title);
-  if (m.balance !== undefined) parts.push(`на карте останется ${money(m.balance)}`);
+  if (m.balance !== undefined) parts.push(`на счёте останется ${money(m.balance)}`);
   return parts.join(', ');
 }
 
@@ -204,7 +334,7 @@ function AutoView() {
 
   return (
     <div className="form">
-      <p className="t-body muted">Сообщение банка само становится операцией: сумма, пополнение или расход, магазин и остаток на карте.</p>
+      <p className="t-body muted">Сообщение банка само становится операцией: сумма, пополнение или расход, магазин и остаток на счёте.</p>
 
       <form className="form" onSubmit={add}>
         <h3 className="t-headline">Проверить на сообщении</h3>
@@ -230,7 +360,7 @@ function AutoView() {
       <p className="t-caption muted">
         Банк шлёт только пуши? iPhone не отдаёт их командам. Тогда собери обычную команду: «Сделать снимок экрана», «Извлечь текст из изображения» и те же два шага, а запускай её двойным касанием задней панели.
       </p>
-      <p className="t-caption muted">Ссылка открывается в Safari, поэтому и карты веди там: у иконки на экране «Домой» отдельные данные.</p>
+      <p className="t-caption muted">Ссылка открывается в Safari, поэтому и счёт веди там: у иконки на экране «Домой» отдельные данные.</p>
     </div>
   );
 }

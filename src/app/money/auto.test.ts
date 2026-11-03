@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 // Each test gets a clean store: appStore reads localStorage when the module loads.
 async function load() {
@@ -6,32 +6,45 @@ async function load() {
   localStorage.clear();
   const { actions, appStore } = await import('../../lib/appStore');
   const auto = await import('./auto');
-  return { actions, appStore, ...auto };
+  const account = await import('./account');
+  return { actions, appStore, ...auto, ...account };
 }
 
 const T = 1_800_000_000_000;
 
 describe('ingesting a bank message', () => {
-  beforeEach(() => vi.useRealTimers());
-
-  test('a top-up lands on the card and its balance wins', async () => {
+  test('a top-up lands on the account and its balance wins', async () => {
     const { actions, appStore, ingestBankMessage } = await load();
     const bank = actions.addBank('tbank', 100);
     const r = ingestBankMessage('Пополнение, счет RUB. 15 000 ₽. Иван И. Доступно 42 350 ₽', T);
-    expect(r).toMatchObject({ ok: true, text: '+15 000 ₽, Т-Банк' });
+    expect(r).toMatchObject({ ok: true, text: '+15 000 ₽' });
     const s = appStore.get().shared;
     expect(s.banks[0]).toMatchObject({ id: bank.id, sum: 42350 });
     expect(s.incomes[0]).toMatchObject({ amount: 15000, source: 'shortcut', note: 'Иван И' });
   });
 
-  test('a purchase lowers the card named in the message', async () => {
-    const { actions, appStore, ingestBankMessage } = await load();
+  test('the account is made on the first message', async () => {
+    const { appStore, balance, ingestBankMessage } = await load();
+    expect(ingestBankMessage('Пополнение на 500 ₽', T).ok).toBe(true);
+    expect(appStore.get().shared.banks).toHaveLength(1);
+    expect(balance()).toBe(500);
+  });
+
+  test('old cards still count: a balance sets the total', async () => {
+    const { actions, balance, ingestBankMessage } = await load();
     actions.addBank('tbank', 100);
-    const sber = actions.addBank('sber', 1000);
-    ingestBankMessage('Сбер Покупка 450р PYATEROCHKA', T);
+    actions.addBank('sber', 1000);
+    ingestBankMessage('Покупка 50р Кофе. Баланс 5 000р', T);
+    expect(balance()).toBe(5000);
+  });
+
+  test('a purchase lowers the account', async () => {
+    const { actions, appStore, ingestBankMessage } = await load();
+    const bank = actions.addBank('tbank', 1000);
+    ingestBankMessage('Покупка 450р PYATEROCHKA', T);
     const s = appStore.get().shared;
-    expect(s.banks.find((b) => b.id === sber.id)?.sum).toBe(550);
-    expect(s.spends[0]).toMatchObject({ amount: 450, title: 'PYATEROCHKA', bankId: sber.id, auto: true });
+    expect(s.banks[0].sum).toBe(550);
+    expect(s.spends[0]).toMatchObject({ amount: 450, title: 'PYATEROCHKA', bankId: bank.id, auto: true });
   });
 
   test('undo restores the sum from before the message', async () => {
@@ -55,12 +68,11 @@ describe('ingesting a bank message', () => {
     expect(appStore.get().shared.banks[0].sum).toBe(800);
   });
 
-  test('nothing happens without a card or with an unreadable message', async () => {
-    const { actions, appStore, ingestBankMessage } = await load();
-    expect(ingestBankMessage('Покупка 100р Кофе', T)).toEqual({ ok: false, reason: 'nocard' });
-    actions.addBank('tbank', 1000);
+  test('an unreadable message changes nothing', async () => {
+    const { appStore, ingestBankMessage } = await load();
     expect(ingestBankMessage('Код для входа: 4821', T)).toEqual({ ok: false, reason: 'unread' });
     expect(appStore.get().shared.spends).toEqual([]);
+    expect(appStore.get().shared.banks).toEqual([]);
   });
 });
 

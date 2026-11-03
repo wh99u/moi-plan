@@ -7,6 +7,8 @@ export interface SheetData {
   id?: string;
   /** Which list the record is from: an income or a spend. */
   tx?: 'in' | 'out';
+  /** The month a new record goes to. */
+  ym?: string;
 }
 
 let current: { kind: SheetKind; data: SheetData } | null = null;

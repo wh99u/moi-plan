@@ -15,7 +15,7 @@ describe('money in', () => {
     expect(parseBankMessage('Пополнение *1234 на 5 000,00 RUR. Баланс 7 000,00 RUR')).toEqual({ kind: 'in', amount: 5000, balance: 7000 });
   });
   test('просто со знаком плюс', () => {
-    expect(parseBankMessage('Т-Банк +1 200 ₽')).toEqual({ kind: 'in', amount: 1200, bank: 'tbank' });
+    expect(parseBankMessage('Т-Банк +1 200 ₽')).toEqual({ kind: 'in', amount: 1200 });
   });
 });
 
@@ -27,14 +27,14 @@ describe('money out', () => {
     expect(parseBankMessage('Перевод 2 000 ₽ для Анны К. Доступно 10 000 ₽')).toEqual({ kind: 'out', amount: 2000, title: 'Анны К', balance: 10000 });
   });
   test('время и номер карты не считаются суммой', () => {
-    expect(parseBankMessage('ВТБ *4821 12:45 Оплата 89,99 руб')).toEqual({ kind: 'out', amount: 89.99, bank: 'vtb' });
+    expect(parseBankMessage('ВТБ *4821 12:45 Оплата 89,99 руб')).toEqual({ kind: 'out', amount: 89.99 });
   });
 });
 
 describe('screenshot text', () => {
   test('лишние строки экрана не мешают', () => {
     const text = 'Вторник, 3 ноября\n14:22\nТ-Банк\nПополнение на 3 500 ₽\nот Марии С.\nПогода 12°';
-    expect(parseBankMessage(text)).toMatchObject({ kind: 'in', amount: 3500, bank: 'tbank' });
+    expect(parseBankMessage(text)).toMatchObject({ kind: 'in', amount: 3500 });
   });
 });
 

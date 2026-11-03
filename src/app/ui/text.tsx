@@ -75,9 +75,9 @@ export function RollingText({ text, className = '' }: { text: string; className?
   );
 }
 
-/** Counts from the previous value to the new one; `group` adds thousands spaces: 35 652. */
-export function CountUp({ value, delay = 0, group = false }: { value: number; delay?: number; group?: boolean }) {
-  const mv = useMotionValue(0);
+/** Counts from the previous value to the new one; `group` adds thousands spaces: 35 652. `settled` starts at the value, without the first count. */
+export function CountUp({ value, delay = 0, group = false, settled = false }: { value: number; delay?: number; group?: boolean; settled?: boolean }) {
+  const mv = useMotionValue(settled ? value : 0);
   const shown = useTransform(mv, (v) => (group ? Math.round(v).toLocaleString('ru-RU').replace(/\s/g, ' ') : Math.round(v).toString()));
   useEffect(() => {
     const c = animate(mv, value, { duration: 1.1, delay, ease: EASE });
