@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 
-export type Tab = 'home' | 'money' | 'wishes' | 'tasks';
+export type Tab = 'home' | 'money' | 'tasks';
 export type Extra = 'stocks' | 'sleep' | 'mood' | 'github' | 'jarvis';
 export type Route = Tab | Extra;
 
@@ -15,7 +15,6 @@ export interface Section {
 export const TABS: Section[] = [
   { id: 'home', label: 'Главная', icon: 'home', hint: '' },
   { id: 'money', label: 'Бюджет', icon: 'wallet', hint: 'Деньги на картах и операции за месяц' },
-  { id: 'wishes', label: 'Желания', icon: 'heart', hint: 'Машина мечты и список желаний' },
   { id: 'tasks', label: 'Задачи', icon: 'calendar', hint: 'Календарь задач и смен' },
 ];
 

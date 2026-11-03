@@ -6,7 +6,6 @@ import { Icon } from '../ui/Icon';
 import { GOOGLE_CLIENT_ID, renderGoogleButton } from './google';
 import { setProfile, useProfile } from './profile';
 import { MoneySheets } from './money/sheets';
-import { WishesSheets } from './wishes/sheets';
 import { EXTRAS, navigate } from './route';
 import { closeSheet, useSheet } from './sheet';
 import { setThemePref, useTheme, type ThemePref } from './theme';
@@ -27,7 +26,6 @@ export function Sheets() {
         <ProfileForm />
       </Sheet>
       <MoneySheets />
-      <WishesSheets />
     </>
   );
 }

@@ -9,7 +9,6 @@ import { closeSheet } from './sheet';
 import { Sheets } from './sheets';
 import { Soon } from './Soon';
 import { EASE } from './ui/text';
-import { WishesPage } from './wishes/WishesPage';
 
 export function App() {
   const route = useRoute();
@@ -47,7 +46,7 @@ export function App() {
             exit="exit"
             transition={{ duration: 0.42, ease: EASE }}
           >
-            {route === 'home' ? <Home /> : route === 'money' ? <MoneyPage /> : route === 'wishes' ? <WishesPage /> : <Soon route={route} />}
+            {route === 'home' ? <Home /> : route === 'money' ? <MoneyPage /> : <Soon route={route} />}
           </motion.main>
         </AnimatePresence>
         <Nav route={route} />
