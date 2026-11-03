@@ -2,7 +2,9 @@ import { useSyncExternalStore } from 'react';
 
 export type Tab = 'home' | 'money' | 'tasks';
 export type Extra = 'stocks' | 'sleep' | 'mood' | 'github' | 'jarvis';
-export type Route = Tab | Extra;
+/** A page of its own inside the budget tab. */
+export type Sub = 'plan';
+export type Route = Tab | Extra | Sub;
 
 export interface Section {
   id: Route;
@@ -27,11 +29,16 @@ export const EXTRAS: Section[] = [
   { id: 'github', label: 'GitHub', icon: 'github', hint: 'Полезные приложения и файлы' },
 ];
 
-const ALL = [...TABS, ...EXTRAS];
+const SUBS: Section[] = [{ id: 'plan', label: 'Планировщик', icon: 'pie', hint: 'Как доход делится между категориями' }];
+
+const ALL = [...TABS, ...EXTRAS, ...SUBS];
 export const section = (r: Route) => ALL.find((s) => s.id === r)!;
+/** The tab a page belongs to. */
+export const tabOf = (r: Route): Route => (r === 'plan' ? 'money' : r);
 export const tabIndex = (r: Route) => {
-  const i = TABS.findIndex((t) => t.id === r);
-  return i < 0 ? TABS.length : i;
+  const i = TABS.findIndex((t) => t.id === tabOf(r));
+  // A page inside a tab slides in from the right of it.
+  return (i < 0 ? TABS.length : i) + (r === 'plan' ? 0.5 : 0);
 };
 
 /** Hash routes (#/money) keep GitHub Pages happy and make the browser «Back» work. */

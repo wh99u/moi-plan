@@ -1,7 +1,8 @@
 import { daysBetween, parseDay } from '../../lib/dates';
 import { rub } from '../../lib/money';
 import { visible } from '../../lib/records';
-import type { Income, Spend, Sub } from '../../lib/types';
+import { addMonths } from '../../lib/dates';
+import type { BudgetMonth, Income, Spend, Sub } from '../../lib/types';
 
 export type DueStatus = 'overdue' | 'today' | 'soon' | 'later';
 
@@ -55,6 +56,8 @@ export interface Tx {
   auto: boolean;
   /** Lines of its receipt. */
   lines: number;
+  /** Budget category of a spend. */
+  catId?: string;
   updatedAt: number;
 }
 
@@ -65,7 +68,7 @@ export function monthTxs(incomes: Income[], spends: Spend[], ym: string): Tx[] {
     .map((x) => ({ id: x.id, kind: 'in', amount: x.amount, date: x.date, title: x.note || 'Пополнение', bankId: x.bankId, auto: x.source === 'shortcut', lines: 0, updatedAt: x.updatedAt }));
   const out: Tx[] = visible(spends)
     .filter((x) => x.ym === ym)
-    .map((x) => ({ id: x.id, kind: 'out', amount: x.amount, date: x.date, title: x.title || x.note || 'Трата', bankId: x.bankId, auto: !!x.auto, lines: x.items?.length ?? 0, updatedAt: x.updatedAt }));
+    .map((x) => ({ id: x.id, kind: 'out', amount: x.amount, date: x.date, title: x.title || x.note || 'Трата', bankId: x.bankId, auto: !!x.auto, lines: x.items?.length ?? 0, catId: x.catId, updatedAt: x.updatedAt }));
   return [...inn, ...out].sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt - a.updatedAt);
 }
 
@@ -85,21 +88,62 @@ export function txDays(txs: Tx[]): TxDay[] {
   return days;
 }
 
-export interface MonthStats {
+/** `n` months ending with `end`, oldest first. */
+export const monthWindow = (end: string, n: number) => Array.from({ length: n }, (_, i) => addMonths(end, i - n + 1));
+
+export interface MonthTotal {
+  ym: string;
   income: number;
   spent: number;
-  /** Income minus spending. */
-  delta: number;
-  /** The delta as a share of what there was before it; null when there is nothing to compare with. */
-  pct: number | null;
-  lastIn: Tx | null;
 }
 
-/** `balance` is the money today; a past month passes null, its percent can't be known. */
-export function monthStats(txs: Tx[], balance: number | null): MonthStats {
-  const income = txs.filter((t) => t.kind === 'in').reduce((s, t) => s + t.amount, 0);
-  const spent = txs.filter((t) => t.kind === 'out').reduce((s, t) => s + t.amount, 0);
-  const delta = income - spent;
-  const before = balance === null ? 0 : balance - delta;
-  return { income, spent, delta, pct: before > 0 && delta ? (delta / before) * 100 : null, lastIn: txs.find((t) => t.kind === 'in') ?? null };
+export function monthTotals(incomes: Income[], spends: Spend[], yms: string[]): MonthTotal[] {
+  return yms.map((ym) => {
+    const list = monthTxs(incomes, spends, ym);
+    const sum = (kind: Tx['kind']) => list.filter((t) => t.kind === kind).reduce((s, t) => s + t.amount, 0);
+    return { ym, income: sum('in'), spent: sum('out') };
+  });
+}
+
+/** Income against spending, in percent of the spending; null when nothing was spent. */
+export const incomeVsSpent = (income: number, spent: number) => (spent > 0 ? ((income - spent) / spent) * 100 : null);
+
+/**
+ * One curve of the chart. Each value sits in the middle of its month's column; the curve leaves
+ * every point flat, so it makes soft hills and never swings past the real values.
+ */
+export function chartPaths(values: number[], max: number, w: number, h: number, top: number, bottom: number, floor = 0) {
+  const step = w / Math.max(1, values.length);
+  const xs = values.map((_, i) => step * (i + 0.5));
+  const ys = values.map((v) => bottom - ((v - floor) / Math.max(1, max - floor)) * (bottom - top));
+  const px = [-step / 2, ...xs, w + step / 2];
+  const py = [ys[0] ?? bottom, ...ys, ys[ys.length - 1] ?? bottom];
+  const r = (n: number) => Math.round(n * 10) / 10;
+  let line = `M${r(px[0])} ${r(py[0])}`;
+  for (let i = 1; i < px.length; i++) {
+    const mid = (px[i - 1] + px[i]) / 2;
+    line += `C${r(mid)} ${r(py[i - 1])} ${r(mid)} ${r(py[i])} ${r(px[i])} ${r(py[i])}`;
+  }
+  return { xs, ys, line, area: `${line}L${r(px[px.length - 1])} ${h}L${r(px[0])} ${h}Z` };
+}
+
+/** Where each category's arc starts on a ring of 100 units, and how long it is. */
+export function donutSegments(limits: number[]) {
+  const total = limits.reduce((t, x) => t + x, 0);
+  if (!total) return [];
+  let start = 0;
+  return limits.map((x) => {
+    const share = (x / total) * 100;
+    const g = { start, share };
+    start += share;
+    return g;
+  });
+}
+
+/** Spent in a month outside its categories. */
+export function unassigned(spends: Spend[], month: BudgetMonth | undefined, ym: string) {
+  const ids = new Set((month?.cats ?? []).map((c) => c.id));
+  return visible(spends)
+    .filter((x) => x.ym === ym && !ids.has(x.catId))
+    .reduce((t, x) => t + x.amount, 0);
 }

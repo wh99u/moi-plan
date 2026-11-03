@@ -21,7 +21,8 @@ test('demo state is a lively current month', () => {
   const month = s.shared.budgets.find((b) => b.ym === '2026-10')!;
   expect(month.income).toBe(90000);
   expect(month.cats).toHaveLength(7);
-  expect(s.shared.spends).toHaveLength(7);
+  expect(s.shared.spends.filter((x) => x.ym === '2026-10')).toHaveLength(7);
+  expect(s.shared.spends.filter((x) => x.ym === '2026-05')).toHaveLength(1);
   expect(s.shared.spends.some((x) => x.items?.length)).toBe(true);
   expect(s.shared.subs.map((x) => x.name)).toEqual(['Интернет', 'Мобильная связь', 'Яндекс Плюс', 'Облако']);
   expect(s.shared.incomes.length).toBeGreaterThan(0);

@@ -33,6 +33,13 @@ export function formatMoney(rub: number, cur: Cur, rate: UsdRate | null) {
   return `${text} $`;
 }
 
+/** The same amount split for big text, where the kopecks are quieter: «78 400», «00», «₽». */
+export function moneyParts(rub: number, cur: Cur, rate: UsdRate | null) {
+  const usd = cur === 'USD' && !!rate;
+  const [int, frac = '00'] = convert(rub, cur, rate).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).split(',');
+  return { int: int.replace(/\s/g, '\u00a0'), frac, sym: usd ? '$' : '₽' };
+}
+
 function read<T>(key: string): T | null {
   try {
     return JSON.parse(localStorage.getItem(key) ?? 'null') as T | null;

@@ -14,17 +14,52 @@
   box-shadow: inset 0 0 0 1px var(--card-line);
 }
 
-.money {
-  --b-feed-plus: #5fe3a1;
+.money,
+.plan {
+  --b-in: #b4b0ff;
+  --b-out: #ff4d66;
+  --b-feed-plus: #b4b0ff;
 }
-[data-theme='light'] .money {
-  --b-feed-plus: #0f7d4f;
+[data-theme='light'] .money,
+[data-theme='light'] .plan {
+  --b-feed-plus: #5148c9;
+}
+
+/* Changing currency: the amounts are smeared, the new ones come out from under the smear. */
+.b-amt {
+  display: inline-block;
+  transform-origin: left center;
+}
+.is-smearing .b-amt {
+  animation: b-smear 0.62s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes b-smear {
+  0% {
+    filter: blur(0);
+    transform: none;
+    opacity: 1;
+  }
+  38% {
+    filter: blur(11px);
+    transform: scaleX(1.22) translateX(5px);
+    opacity: 0.5;
+  }
+  100% {
+    filter: blur(0);
+    transform: none;
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-smearing .b-amt {
+    animation: none;
+  }
 }
 
 /* ───────── the dark stage ───────── */
 .b-stage {
   position: relative;
-  padding-bottom: 18px;
+  padding-bottom: 16px;
   background: var(--hero-bg);
   color: var(--hero-text);
   border-radius: 0 0 var(--r-xl) var(--r-xl);
@@ -38,78 +73,21 @@
   gap: 8px;
   padding: calc(var(--sat) + 14px) var(--gutter) 0;
 }
-.b-month {
-  display: flex;
-  align-items: center;
-  height: 42px;
-  padding: 0 2px;
-  border-radius: var(--r-pill);
-  background: rgba(255, 240, 243, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(255, 240, 243, 0.12);
-}
-.b-month-btn {
-  width: 30px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  color: var(--hero-text-2);
-}
-.b-month-btn:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-.b-month-name {
-  min-width: 56px;
-  text-align: center;
-}
-.b-switch {
-  display: flex;
-  height: 42px;
-  padding: 3px;
-  border-radius: var(--r-pill);
-  background: rgba(255, 240, 243, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(255, 240, 243, 0.12);
-}
-.b-switch-btn {
-  position: relative;
-  width: 32px;
-  border-radius: 50%;
-  color: var(--hero-text-2);
-  transition: color 0.2s;
-}
-.b-switch-btn[aria-pressed='true'] {
-  color: #fff;
-}
-.b-switch-thumb {
-  position: absolute;
-  inset: 0;
-  border-radius: var(--r-pill);
-  background: var(--accent);
-}
-.b-switch-mark {
-  position: relative;
-  font-size: 15px;
-  font-weight: 600;
-}
 .b-total {
-  margin-top: 26px;
+  margin-top: 20px;
   padding: 0 var(--gutter);
-  text-align: center;
 }
-.b-delta {
+.b-total-label {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 28px;
+  gap: 4px;
+  color: var(--hero-text-2);
 }
-.b-plus {
-  color: #5fe3a1;
-  font-weight: 600;
-}
-.b-minus {
-  color: #ff7d90;
-  font-weight: 600;
+.b-total-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 .b-quiet {
   color: var(--hero-text-2);
@@ -122,116 +100,200 @@
   border-radius: 50%;
   color: var(--hero-text-2);
 }
-/* The sum rises from behind this edge. */
+/* The sum rises from behind this edge; the padding keeps the smear from being cut. */
 .b-sum-clip {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
+  padding: 4px 0;
 }
 .b-sum {
-  margin: 2px 0 0;
-  font-size: clamp(44px, 14vw, 60px);
-  line-height: 1.08;
-  font-weight: 500;
-  letter-spacing: -0.045em;
-}
-.b-cur {
-  margin-left: 0.14em;
-  font-weight: 400;
-  color: var(--hero-text-2);
-}
-
-/* ───────── the card ─────────
-   Geometry measured on the reference photo, as shares of the phone's width: the top-left corner
-   at 9.65 %, 72 % wide; the top edge falls 0.114 per unit to the right, the sides lean 0.24 to
-   the right going down, and the height is squashed to 0.72. The tiles hide its lower part. */
-.b-deck {
-  position: relative;
-  z-index: 0;
-  aspect-ratio: 318 / 92;
-  margin-top: 16px;
-}
-.b-card {
-  position: absolute;
-  left: 9.65%;
-  top: 0;
-  width: 72%;
-  aspect-ratio: 1.6;
   display: block;
-  overflow: hidden;
-  border-radius: 22px;
-  transform-origin: 0 0;
-  transform: matrix(1, 0.114, 0.173, 0.72, 0, 0);
-  background:
-    radial-gradient(26% 30% at 36% 0%, rgba(255, 196, 204, 0.8), transparent),
-    radial-gradient(72% 78% at 54% 4%, #ec1f3f, transparent),
-    radial-gradient(42% 56% at 100% 0%, #ff4d58, transparent),
-    radial-gradient(52% 66% at 0% 0%, #b5122f, transparent),
-    radial-gradient(46% 40% at 4% 76%, rgba(214, 96, 112, 0.34), transparent),
-    #060203;
-  box-shadow:
-    inset 0 1.5px 0 rgba(255, 255, 255, 0.55),
-    inset 1.5px 0 0 rgba(255, 255, 255, 0.28),
-    inset -1px 0 0 rgba(255, 255, 255, 0.14);
+  color: inherit;
+  text-align: left;
+  white-space: nowrap;
+  font-size: clamp(34px, 10.8vw, 48px);
+  line-height: 1.08;
+  font-weight: 600;
+  letter-spacing: -0.04em;
 }
-.b-card:focus-visible {
-  outline-offset: 2px;
+.b-frac {
+  color: var(--hero-text-2);
+  font-weight: 500;
 }
-/* One slow pass of light after the card lands. */
-.b-card-shine {
-  position: absolute;
-  inset: 0 -40%;
-  background: linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.22) 50%, transparent 58%);
-  transform: translateX(-70%);
-  animation: b-shine 1.5s 1.1s cubic-bezier(0.3, 0, 0.2, 1) both;
+.b-cur-btn {
+  flex: none;
+  font-size: 18px;
+  font-weight: 600;
 }
-@keyframes b-shine {
-  to {
-    transform: translateX(70%);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .b-card-shine {
-    display: none;
-  }
+.b-rate {
+  margin-top: 2px;
 }
 
-/* ───────── tiles over the card's lower part ───────── */
-.b-tiles {
+/* ───────── the chart ───────── */
+.b-chart {
   position: relative;
-  z-index: 1;
-  display: flex;
-  gap: 10px;
-  margin: 0;
-  padding: 0 var(--gutter);
-  list-style: none;
-  overflow-x: auto;
-  scroll-snap-type: x proximity;
-  scroll-padding: 0 var(--gutter);
-  scrollbar-width: none;
+  margin-top: 8px;
 }
-.b-tiles::-webkit-scrollbar {
-  display: none;
+.b-chart-svg {
+  position: absolute;
+  inset: 0 0 auto;
+  display: block;
+}
+.b-chart-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.b-chart-band {
+  position: absolute;
+  left: 0;
+  bottom: 34px;
+  width: 34px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.16), transparent);
+}
+.b-chart-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2.5px solid var(--hero-bg);
+}
+.b-chart-dot--in {
+  background: var(--b-in);
+}
+.b-chart-dot--out {
+  background: var(--b-out);
+}
+/* A zero-width anchor, so the bubble centres on it whatever its width. */
+.b-chart-bubble-at {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  display: flex;
+  justify-content: center;
+}
+.b-chart-bubble {
+  flex: none;
+  padding: 7px 12px;
+  border-radius: 12px;
+  white-space: nowrap;
+  font-weight: 650;
+  color: #14122b;
+  background: var(--b-in);
+}
+.b-chart-bubble.is-minus {
+  color: #fff;
+  background: var(--b-out);
+}
+.b-chart-months {
+  position: absolute;
+  inset: 0;
+  display: grid;
+}
+.b-chart-month {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 8px;
+  color: var(--hero-text-2);
+  transition: color 0.25s;
+}
+.b-chart-month.is-on {
+  color: var(--b-in);
+  font-weight: 650;
+}
+
+/* ───────── tiles and the plaque ───────── */
+.b-pad {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 0 var(--gutter);
+}
+.b-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 .b-tile {
-  flex: 0 0 40%;
-  min-width: 146px;
-  min-height: 124px;
+  min-width: 0;
   padding: 14px;
   display: flex;
   flex-direction: column;
-  scroll-snap-align: start;
-  border-radius: 20px;
-  background: #0b0506;
-  box-shadow: inset 0 0 0 1px rgba(255, 240, 243, 0.14);
+  border-radius: 22px;
+  text-align: left;
+  background: rgba(255, 240, 243, 0.07);
 }
-.b-tile-top {
+.b-tile-icon {
+  width: 38px;
+  height: 38px;
+  margin-bottom: 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #14122b;
+}
+.b-tile-icon.is-in {
+  background: var(--b-in);
+}
+.b-tile-icon.is-out {
+  color: #fff;
+  background: var(--b-out);
+}
+.b-tile-sum {
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: clamp(16px, 5vw, 21px);
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.b-plaque {
+  width: 100%;
+  min-height: 62px;
+  padding: 11px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  border-radius: 20px;
+  text-align: left;
+  color: #14122b;
+  background:
+    linear-gradient(115deg, transparent 58%, rgba(255, 255, 255, 0.16) 58%, rgba(255, 255, 255, 0.16) 74%, transparent 74%),
+    linear-gradient(100deg, #c9c6ff, #9b96f5);
 }
-.b-tile-label {
-  margin-top: auto;
-  padding-bottom: 3px;
-  color: var(--hero-text-2);
+.b-plaque-text {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.b-plaque-pct {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 20px;
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.b-plaque-arrow {
+  display: grid;
+  rotate: -90deg;
+}
+.b-plaque-arrow.is-down {
+  rotate: 90deg;
+}
+.b-plaque-go {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 600;
 }
 
 /* ───────── what just happened ───────── */
@@ -494,4 +556,216 @@
   display: grid;
   place-items: center;
   color: var(--text-3);
+}
+
+/* Choosing a colour and a mark */
+.b-chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.b-chips::-webkit-scrollbar {
+  display: none;
+}
+.b-chip {
+  flex: none;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: var(--r-pill);
+  color: var(--text-2);
+  background: var(--fill);
+  transition: background 0.2s, color 0.2s;
+}
+.b-chip.is-on {
+  color: #fff;
+  background: var(--accent);
+}
+.b-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.b-pick {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--text-2);
+  background: var(--fill);
+}
+.b-pick.is-on {
+  color: var(--text);
+  box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--accent-hi);
+}
+
+/* ───────── the planner ───────── */
+.plan {
+  padding: 0 var(--gutter);
+}
+.plan-bar {
+  padding-left: 0;
+  padding-right: 0;
+}
+.plan-bar-side {
+  width: 46px;
+}
+.b-month {
+  display: flex;
+  align-items: center;
+  height: 42px;
+  padding: 0 2px;
+  border-radius: var(--r-pill);
+  background: var(--fill);
+}
+.b-month-btn {
+  width: 34px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+}
+.b-month-name {
+  min-width: 64px;
+  text-align: center;
+}
+.plan-month {
+  width: fit-content;
+  margin: 14px auto 0;
+}
+.plan-ring {
+  position: relative;
+  width: min(68vw, 260px);
+  margin: 18px auto 0;
+  aspect-ratio: 1;
+}
+.plan-ring svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.plan-ring-track {
+  fill: none;
+  stroke: var(--fill);
+  stroke-width: 9;
+}
+.plan-ring-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 18%;
+  text-align: center;
+}
+.plan-ring-sum {
+  font-size: clamp(22px, 6.6vw, 30px);
+  line-height: 1.15;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+.plan-ring-sum.is-over,
+.plan-over {
+  color: var(--accent-hi);
+}
+.plan-tiles {
+  margin-top: 18px;
+}
+.plan-tile {
+  gap: 2px;
+  color: var(--text);
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--card-line);
+}
+.plan-head {
+  margin: 24px 0 10px;
+}
+.plan-empty {
+  display: grid;
+  gap: 10px;
+}
+.plan-empty .ghost-btn {
+  margin-top: 0;
+}
+.plan-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+}
+.plan-cat {
+  width: 100%;
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  border-radius: 22px;
+  text-align: left;
+  color: var(--text);
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--card-line);
+}
+.plan-cat-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.plan-cat-icon {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--fill);
+}
+.plan-cat-name {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.plan-cat-limit {
+  flex: none;
+}
+.plan-cat-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.plan-bar-track {
+  display: block;
+  height: 9px;
+  border-radius: var(--r-pill);
+  background: var(--fill);
+  overflow: hidden;
+}
+.plan-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  transform-origin: left;
+}
+.plan-loose {
+  padding: 4px 2px;
+}
+.plan-new {
+  position: sticky;
+  z-index: 3;
+  bottom: calc(var(--dock-h) + var(--dock-gap) + 10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: fit-content;
+  height: 50px;
+  margin: 16px auto 0;
+  padding: 0 22px;
+  border-radius: var(--r-pill);
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  box-shadow: 0 12px 30px -10px rgba(214, 34, 63, 0.7);
 }

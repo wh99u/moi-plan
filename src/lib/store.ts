@@ -201,7 +201,7 @@ export function createStore(storage: Storage, key: string, opts: StoreOptions = 
       shared({ spends: removeIn(state.shared.spends, id) });
     },
     /** Money out of a card: logs a spend, for today unless told otherwise, and lowers the card's sum. */
-    spendFrom(bankId: string, amount: number, extra: Pick<Spend, 'title' | 'auto' | 'items'> = {}, date = dayKey(today())): Spend {
+    spendFrom(bankId: string, amount: number, extra: Partial<Pick<Spend, 'title' | 'auto' | 'items' | 'catId'>> = {}, date = dayKey(today())): Spend {
       const spend: Spend = stamp({ id: uid(), ym: date.slice(0, 7), catId: '', amount, date, bankId, ...extra });
       shared({
         banks: state.shared.banks.map((b) => (b.id === bankId ? { ...b, sum: b.sum - amount, updatedAt: Date.now() } : b)),

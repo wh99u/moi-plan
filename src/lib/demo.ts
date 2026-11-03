@@ -1,4 +1,4 @@
-import { addDays, dayKey, ymKey } from './dates';
+import { addDays, addMonths, dayKey, ymKey } from './dates';
 import { emptyState } from './defaults';
 import { uid } from './ids';
 import { templateCategories } from './template';
@@ -63,6 +63,12 @@ export function demoState(today = new Date()): StateV4 {
       ],
     },
   ];
+  // Earlier months, so the chart has something to draw.
+  [[69000, 47000], [77000, 53000], [58000, 62000], [81000, 49000], [64000, 58000], [72000, 51000]].forEach(([income, spent], i) => {
+    const m = addMonths(ym, i - 6);
+    s.shared.incomes.push(rec({ date: `${m}-10`, amount: income, bankId: s.shared.banks[0].id, source: 'manual' as const }));
+    s.shared.spends.push(rec({ ym: m, catId: '', amount: spent, date: `${m}-20`, title: 'Расходы за месяц' }));
+  });
   const sub = (name: string, icon: string, amount: number, offset: number, catName: string, period: 'month' | 'year' = 'month') =>
     rec({ name, icon, amount, next: dayKey(addDays(today, offset)), period, catName });
   s.shared.subs = [

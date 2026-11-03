@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { Income, Spend, Sub } from '../../lib/types';
-import { dueLabel, monthStats, monthTxs, txDays, upcoming } from './logic';
+import { chartPaths, donutSegments, dueLabel, incomeVsSpent, monthTotals, monthTxs, monthWindow, txDays, unassigned, upcoming } from './logic';
 
 const sub = (id: string, next: string, extra: Partial<Sub> = {}): Sub => ({
   id,
@@ -72,18 +72,71 @@ describe('month feed', () => {
   });
 });
 
-describe('month stats', () => {
-  const list = monthTxs([inc('a', '2026-11-02', 1000), inc('z', '2026-11-05', 200)], [out('b', '2026-11-03', 200)], '2026-11');
+describe('chart', () => {
+  test('a window of months ends with the given one, across the new year', () => {
+    expect(monthWindow('2026-02', 4)).toEqual(['2025-11', '2025-12', '2026-01', '2026-02']);
+  });
 
-  test('difference and its share of what there was before', () => {
-    expect(monthStats(list, 11000)).toMatchObject({ income: 1200, spent: 200, delta: 1000, pct: 10 });
+  test('totals per month', () => {
+    const totals = monthTotals([inc('a', '2026-11-02', 100), inc('b', '2026-10-02', 7)], [out('c', '2026-11-03', 40), out('d', '2026-11-04', 2)], ['2026-10', '2026-11']);
+    expect(totals).toEqual([
+      { ym: '2026-10', income: 7, spent: 0 },
+      { ym: '2026-11', income: 100, spent: 42 },
+    ]);
   });
-  test('the newest top-up', () => {
-    expect(monthStats(list, 11000).lastIn?.id).toBe('z');
+
+  test('the biggest value reaches the top, zero stays at the bottom', () => {
+    const p = chartPaths([0, 50, 100], 100, 300, 200, 40, 160);
+    expect(p.ys).toEqual([160, 100, 40]);
+    expect(p.xs).toEqual([50, 150, 250]);
   });
-  test('no percent without a base or without a change', () => {
-    expect(monthStats(list, 1000).pct).toBeNull();
-    expect(monthStats([], 500)).toMatchObject({ delta: 0, pct: null, lastIn: null });
-    expect(monthStats(list, null)).toMatchObject({ delta: 1000, pct: null });
+
+  test('a floor stretches close values over the whole height', () => {
+    expect(chartPaths([60, 80, 100], 100, 300, 200, 40, 160, 60).ys).toEqual([160, 100, 40]);
+  });
+
+  test('the curve runs past both edges and never leaves the range', () => {
+    const p = chartPaths([100, 0, 100, 0], 100, 400, 200, 40, 160);
+    const nums = p.line.match(/-?\d+(\.\d+)?/g)!.map(Number);
+    const ys = nums.filter((_, i) => i % 2 === 1);
+    expect(Math.min(...ys)).toBe(40);
+    expect(Math.max(...ys)).toBe(160);
+    expect(nums[0]).toBeLessThan(0);
+    expect(nums[nums.length - 2]).toBeGreaterThan(400);
+  });
+
+  test('a new month changes only the numbers of the path, so it can morph', () => {
+    const shape = (s: string) => s.replace(/-?\d+(\.\d+)?/g, '#');
+    expect(shape(chartPaths([1, 2, 3], 3, 300, 200, 40, 160).line)).toBe(shape(chartPaths([9, 0, 4], 9, 300, 200, 40, 160).line));
+  });
+});
+
+describe('income against spending', () => {
+  test('percent of the spending', () => {
+    expect(incomeVsSpent(50000, 40000)).toBe(25);
+    expect(incomeVsSpent(30000, 40000)).toBe(-25);
+    expect(incomeVsSpent(40000, 40000)).toBe(0);
+  });
+  test('nothing to compare with', () => {
+    expect(incomeVsSpent(50000, 0)).toBeNull();
+    expect(incomeVsSpent(0, 0)).toBeNull();
+  });
+});
+
+describe('planner', () => {
+  test('ring segments follow each other and fill it', () => {
+    const g = donutSegments([50, 30, 20]);
+    expect(g).toEqual([
+      { start: 0, share: 50 },
+      { start: 50, share: 30 },
+      { start: 80, share: 20 },
+    ]);
+    expect(donutSegments([0, 0])).toEqual([]);
+  });
+
+  test('spending outside the categories is counted apart', () => {
+    const month = { id: 'm', ym: '2026-11', income: 0, updatedAt: 0, cats: [{ id: 'food', name: 'Еда', icon: 'food', color: '#000', limit: 100 }] };
+    const list = [out('a', '2026-11-01', 10, { catId: 'food' }), out('b', '2026-11-02', 20), out('c', '2026-11-03', 5, { catId: 'old' }), out('d', '2026-10-03', 7)];
+    expect(unassigned(list, month, '2026-11')).toBe(25);
   });
 });

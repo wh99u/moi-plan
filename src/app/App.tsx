@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import { Home } from './home/Home';
 import { takeBankLink } from './money/auto';
 import { MoneyPage } from './money/MoneyPage';
+import { PlanPage } from './money/PlanPage';
 import { Nav } from './Nav';
 import { tabIndex, useRoute } from './route';
 import { closeSheet } from './sheet';
@@ -46,7 +47,7 @@ export function App() {
             exit="exit"
             transition={{ duration: 0.42, ease: EASE }}
           >
-            {route === 'home' ? <Home /> : route === 'money' ? <MoneyPage /> : <Soon route={route} />}
+            {route === 'home' ? <Home /> : route === 'money' ? <MoneyPage /> : route === 'plan' ? <PlanPage /> : <Soon route={route} />}
           </motion.main>
         </AnimatePresence>
         <Nav route={route} />

@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { Icon } from '../ui/Icon';
 import { CapMark } from './brand/CapMark';
-import { TABS, href, type Route } from './route';
+import { TABS, href, tabOf, type Route } from './route';
 import { toggleSheet, useSheet } from './sheet';
 import { EASE } from './ui/text';
 
@@ -11,13 +11,13 @@ const SPRING = { type: 'spring', stiffness: 460, damping: 36 } as const;
 export function Nav({ route }: { route: Route }) {
   const sheet = useSheet();
   const moreOpen = sheet === 'more';
-  const extraActive = !TABS.some((t) => t.id === route);
+  const extraActive = !TABS.some((t) => t.id === tabOf(route));
 
   return (
     <motion.div className="dock" initial={{ y: 120, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.5, duration: 0.9, ease: EASE }}>
       <nav className="tabbar" aria-label="Разделы">
         {TABS.map((t) => {
-          const active = t.id === route;
+          const active = t.id === tabOf(route);
           return (
             <motion.a
               key={t.id}

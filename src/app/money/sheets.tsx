@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { actions, useStore } from '../../lib/appStore';
 import { dayKey, daysInMonth, fmtDay, ymKey } from '../../lib/dates';
 import { visible } from '../../lib/records';
+import { CATEGORY_COLORS, CATEGORY_ICONS } from '../../lib/template';
 import type { SpendItem } from '../../lib/types';
 import { Icon } from '../../ui/Icon';
 import { closeSheet, useSheet, useSheetData } from '../sheet';
@@ -31,8 +32,14 @@ export function MoneySheets() {
       <Sheet open={kind === 'txView'} onClose={closeSheet} title="Операция">
         {data.id && <TxView id={data.id} kind={data.tx ?? 'out'} />}
       </Sheet>
-      <Sheet open={kind === 'card'} onClose={closeSheet} title="Сумма на счёте">
+      <Sheet open={kind === 'balance'} onClose={closeSheet} title="Сумма на счёте">
         <BalanceForm />
+      </Sheet>
+      <Sheet open={kind === 'cat'} onClose={closeSheet} title={data.id ? 'Категория' : 'Новая категория'}>
+        <CategoryForm key={data.id ?? 'new'} ym={data.ym ?? ymKey(new Date())} id={data.id} />
+      </Sheet>
+      <Sheet open={kind === 'planIncome'} onClose={closeSheet} title="Доход на месяц">
+        <PlanIncomeForm ym={data.ym ?? ymKey(new Date())} />
       </Sheet>
       <Sheet open={kind === 'auto'} onClose={closeSheet} title="Автодобавление">
         <AutoView />
@@ -130,6 +137,21 @@ function LinesEditor({ lines, onChange }: { lines: Line[]; onChange: (lines: Lin
   );
 }
 
+/** Budget categories of a month to pick from; nothing to show when it has none. */
+function CatChips({ ym, value, onChange }: { ym: string; value: string; onChange: (id: string) => void }) {
+  const cats = useStore((s) => visible(s.shared.budgets).find((b) => b.ym === ym)?.cats ?? []);
+  if (!cats.length) return null;
+  return (
+    <div className="b-chips" role="group" aria-label="Категория">
+      {cats.map((c) => (
+        <button key={c.id} type="button" className={`b-chip t-caption${c.id === value ? ' is-on' : ''}`} aria-pressed={c.id === value} onClick={() => onChange(c.id === value ? '' : c.id)}>
+          {c.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /* ───────── new operation ───────── */
 
 function TxForm({ ym }: { ym: string }) {
@@ -139,6 +161,7 @@ function TxForm({ ym }: { ym: string }) {
   const [title, setTitle] = useState('');
   const [date, setDate] = useState(ym === today.slice(0, 7) ? today : `${ym}-${String(daysInMonth(ym)).padStart(2, '0')}`);
   const [lines, setLines] = useState<Line[]>([]);
+  const [catId, setCatId] = useState('');
   const input = useRef<HTMLInputElement>(null);
 
   const scan = useReceiptScan((r) => {
@@ -148,6 +171,7 @@ function TxForm({ ym }: { ym: string }) {
     const total = r.total ?? itemsSum(r.items);
     if (total) setAmount(show(total));
     if (r.date) setDate(r.date);
+    setCatId('');
   });
 
   useEffect(() => {
@@ -163,7 +187,7 @@ function TxForm({ ym }: { ym: string }) {
     const day = date || today;
     if (kind === 'out') {
       const items = toItems(lines);
-      actions.spendFrom(accountId(), n, { ...(t ? { title: t } : {}), ...(items.length ? { items } : {}) }, day);
+      actions.spendFrom(accountId(), n, { catId, ...(t ? { title: t } : {}), ...(items.length ? { items } : {}) }, day);
     } else {
       actions.topUp(accountId(), n, 'manual', t || undefined, day);
     }
@@ -184,7 +208,18 @@ function TxForm({ ym }: { ym: string }) {
       {kind === 'out' && <ScanButton scan={scan} label="Сфотографировать чек" />}
       <input ref={input} className="field" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Сумма, ₽" aria-label="Сумма" />
       <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={kind === 'out' ? 'На что' : 'От кого'} aria-label="Название" maxLength={60} />
-      <input className="field" type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Дата" />
+      <input
+        className="field"
+        type="date"
+        value={date}
+        onChange={(e) => {
+          setDate(e.target.value);
+          // Each month has categories of its own.
+          if (e.target.value.slice(0, 7) !== date.slice(0, 7)) setCatId('');
+        }}
+        aria-label="Дата"
+      />
+      {kind === 'out' && <CatChips ym={(date || today).slice(0, 7)} value={catId} onChange={setCatId} />}
       {kind === 'out' && lines.length > 0 && <LinesEditor lines={lines} onChange={setLines} />}
       <motion.button type="submit" className="primary-btn" disabled={!n} whileTap={{ scale: 0.96 }}>
         Добавить
@@ -231,6 +266,8 @@ function TxView({ id, kind }: { id: string; kind: 'in' | 'out' }) {
         {fmtDay(rec.date, true)}
         {auto ? ', добавлено само' : ''}
       </p>
+
+      {spend && <CatChips ym={spend.ym} value={spend.catId} onChange={(catId) => actions.updateSpend(spend.id, { catId })} />}
 
       {kind === 'out' &&
         (draft ? (
@@ -297,6 +334,79 @@ function BalanceForm() {
   return (
     <form className="form" onSubmit={save}>
       <input className="field" inputMode="decimal" value={sum} onChange={(e) => setSum(e.target.value)} placeholder="Сколько сейчас на счёте, ₽" aria-label="Сумма на счёте" />
+      <motion.button type="submit" className="primary-btn" whileTap={{ scale: 0.96 }}>
+        Сохранить
+      </motion.button>
+    </form>
+  );
+}
+
+/* ───────── planner ───────── */
+
+function CategoryForm({ ym, id }: { ym: string; id?: string }) {
+  const cat = useStore((s) => visible(s.shared.budgets).find((b) => b.ym === ym)?.cats.find((c) => c.id === id));
+  const [name, setName] = useState(cat?.name ?? '');
+  const [limit, setLimit] = useState(cat ? show(cat.limit) : '');
+  const [color, setColor] = useState(cat?.color ?? CATEGORY_COLORS[0]);
+  const [icon, setIcon] = useState(cat?.icon ?? CATEGORY_ICONS[0]);
+
+  const save = (e: FormEvent) => {
+    e.preventDefault();
+    const n = name.trim();
+    if (!n) return;
+    if (cat) actions.updateCategory(ym, cat.id, { name: n, limit: num(limit), color, icon });
+    else actions.addCategory(ym, { name: n, limit: num(limit), color, icon });
+    closeSheet();
+  };
+
+  return (
+    <form className="form" onSubmit={save}>
+      <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Название" aria-label="Название категории" maxLength={40} />
+      <input className="field" inputMode="decimal" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="Сколько запланировать, ₽" aria-label="План на месяц" />
+      <div className="b-picks" role="group" aria-label="Цвет">
+        {CATEGORY_COLORS.map((c) => (
+          <button key={c} type="button" className={`b-pick b-pick--color${c === color ? ' is-on' : ''}`} style={{ background: c }} aria-label={`Цвет ${c}`} aria-pressed={c === color} onClick={() => setColor(c)} />
+        ))}
+      </div>
+      <div className="b-picks" role="group" aria-label="Значок">
+        {CATEGORY_ICONS.map((x) => (
+          <button key={x} type="button" className={`b-pick${x === icon ? ' is-on' : ''}`} aria-label={`Значок ${x}`} aria-pressed={x === icon} onClick={() => setIcon(x)}>
+            <Icon name={x} size={20} />
+          </button>
+        ))}
+      </div>
+      <motion.button type="submit" className="primary-btn" disabled={!name.trim()} whileTap={{ scale: 0.96 }}>
+        {cat ? 'Сохранить' : 'Добавить категорию'}
+      </motion.button>
+      {cat && (
+        <motion.button
+          type="button"
+          className="ghost-btn"
+          onClick={() => {
+            actions.deleteCategory(ym, cat.id);
+            closeSheet();
+          }}
+          whileTap={{ scale: 0.96 }}
+        >
+          <Icon name="trash" size={18} />
+          Удалить категорию
+        </motion.button>
+      )}
+    </form>
+  );
+}
+
+function PlanIncomeForm({ ym }: { ym: string }) {
+  const current = useStore((s) => visible(s.shared.budgets).find((b) => b.ym === ym)?.income ?? 0);
+  const [sum, setSum] = useState(current ? show(current) : '');
+  const save = (e: FormEvent) => {
+    e.preventDefault();
+    actions.updateBudget(ym, { income: num(sum) });
+    closeSheet();
+  };
+  return (
+    <form className="form" onSubmit={save}>
+      <input className="field" inputMode="decimal" value={sum} onChange={(e) => setSum(e.target.value)} placeholder="Сколько планируешь получить, ₽" aria-label="Доход на месяц" />
       <motion.button type="submit" className="primary-btn" whileTap={{ scale: 0.96 }}>
         Сохранить
       </motion.button>
