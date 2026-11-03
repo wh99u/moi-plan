@@ -12,7 +12,7 @@ import { Sheet } from '../ui/Sheet';
 import { accountId, balance, setBalance } from './account';
 import { ingestBankMessage, noticeOf, setNotice } from './auto';
 import { parseBankMessage } from './bankText';
-import { money } from './logic';
+import { exactMoney, money } from './logic';
 import type { ParsedReceipt } from './receipt';
 import { pickReceipt, scanReceipt, type ScanStage } from './scan';
 
@@ -27,7 +27,7 @@ export function MoneySheets() {
   return (
     <>
       <Sheet open={kind === 'tx'} onClose={closeSheet} title="Новая операция">
-        <TxForm ym={data.ym ?? ymKey(new Date())} />
+        <TxForm ym={data.ym ?? ymKey(new Date())} file={data.file} />
       </Sheet>
       <Sheet open={kind === 'txView'} onClose={closeSheet} title="Операция">
         {data.id && <TxView id={data.id} kind={data.tx ?? 'out'} />}
@@ -72,28 +72,26 @@ function useReceiptScan(onResult: (r: ParsedReceipt) => void) {
   const [progress, setProgress] = useState<{ stage: ScanStage; share: number } | null>(null);
   const [note, setNote] = useState('');
 
-  const start = () => {
-    // The picker opens only straight from a tap.
-    void pickReceipt().then(async (file) => {
-      if (!file) return;
-      setNote('');
-      setProgress({ stage: 'prepare', share: 0 });
-      try {
-        const r = await scanReceipt(file, (stage, share) => setProgress({ stage, share }));
-        if (r.items.length || r.total) {
-          onResult(r);
-          setNote('Проверь позиции: распознавание иногда ошибается');
-        } else {
-          setNote('Не получилось прочитать чек. Сфотографируй ровнее и при хорошем свете');
-        }
-      } catch {
-        setNote('Не удалось распознать чек: нет связи или фото не открылось');
-      } finally {
-        setProgress(null);
+  const read = async (file: File) => {
+    setNote('');
+    setProgress({ stage: 'prepare', share: 0 });
+    try {
+      const r = await scanReceipt(file, (stage, share) => setProgress({ stage, share }));
+      if (r.items.length || r.total) {
+        onResult(r);
+        setNote('Проверь позиции: распознавание иногда ошибается');
+      } else {
+        setNote('Не получилось прочитать чек. Сфотографируй ровнее и при хорошем свете');
       }
-    });
+    } catch {
+      setNote('Не удалось распознать чек: нет связи или фото не открылось');
+    } finally {
+      setProgress(null);
+    }
   };
-  return { start, progress, note };
+  // The picker opens only straight from a tap.
+  const start = () => void pickReceipt().then((file) => file && read(file));
+  return { start, read, progress, note };
 }
 
 function ScanButton({ scan, label }: { scan: ReturnType<typeof useReceiptScan>; label: string }) {
@@ -154,7 +152,7 @@ function CatChips({ ym, value, onChange }: { ym: string; value: string; onChange
 
 /* ───────── new operation ───────── */
 
-function TxForm({ ym }: { ym: string }) {
+function TxForm({ ym, file }: { ym: string; file?: File }) {
   const today = dayKey(new Date());
   const [kind, setKind] = useState<'out' | 'in'>('out');
   const [amount, setAmount] = useState('');
@@ -174,9 +172,17 @@ function TxForm({ ym }: { ym: string }) {
     setCatId('');
   });
 
+  const began = useRef(false);
   useEffect(() => {
+    if (file) {
+      if (!began.current) void scan.read(file);
+      began.current = true;
+      return;
+    }
     const t = setTimeout(() => input.current?.focus(), 380);
     return () => clearTimeout(t);
+    // Once, when the form opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const n = num(amount);
@@ -309,15 +315,15 @@ function Receipt({ items, amount, onEdit }: { items: SpendItem[]; amount: number
         {items.map((x, i) => (
           <li key={i} className="t-body">
             <span>{x.name}</span>
-            <span className="t-num">{money(x.price)}</span>
+            <span className="t-num">{exactMoney(x.price)}</span>
           </li>
         ))}
       </ul>
       <div className="b-receipt-total t-headline">
         <span>Итого</span>
-        <span className="t-num">{money(sum)}</span>
+        <span className="t-num">{exactMoney(sum)}</span>
       </div>
-      {sum !== round2(amount) && <p className="t-caption muted">Сумма операции другая: {money(amount)}. Возможно, скидка или ошибка распознавания.</p>}
+      {sum !== round2(amount) && <p className="t-caption muted">Сумма операции другая: {exactMoney(amount)}. Возможно, скидка или ошибка распознавания.</p>}
     </section>
   );
 }
@@ -347,7 +353,7 @@ function CategoryForm({ ym, id }: { ym: string; id?: string }) {
   const cat = useStore((s) => visible(s.shared.budgets).find((b) => b.ym === ym)?.cats.find((c) => c.id === id));
   const [name, setName] = useState(cat?.name ?? '');
   const [limit, setLimit] = useState(cat ? show(cat.limit) : '');
-  const [color, setColor] = useState(cat?.color ?? CATEGORY_COLORS[0]);
+  const color = cat?.color ?? CATEGORY_COLORS[0];
   const [icon, setIcon] = useState(cat?.icon ?? CATEGORY_ICONS[0]);
 
   const save = (e: FormEvent) => {
@@ -363,11 +369,6 @@ function CategoryForm({ ym, id }: { ym: string; id?: string }) {
     <form className="form" onSubmit={save}>
       <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Название" aria-label="Название категории" maxLength={40} />
       <input className="field" inputMode="decimal" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="Сколько запланировать, ₽" aria-label="План на месяц" />
-      <div className="b-picks" role="group" aria-label="Цвет">
-        {CATEGORY_COLORS.map((c) => (
-          <button key={c} type="button" className={`b-pick b-pick--color${c === color ? ' is-on' : ''}`} style={{ background: c }} aria-label={`Цвет ${c}`} aria-pressed={c === color} onClick={() => setColor(c)} />
-        ))}
-      </div>
       <div className="b-picks" role="group" aria-label="Значок">
         {CATEGORY_ICONS.map((x) => (
           <button key={x} type="button" className={`b-pick${x === icon ? ' is-on' : ''}`} aria-label={`Значок ${x}`} aria-pressed={x === icon} onClick={() => setIcon(x)}>

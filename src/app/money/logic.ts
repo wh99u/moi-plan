@@ -1,7 +1,6 @@
-import { daysBetween, parseDay } from '../../lib/dates';
+import { addDays, addMonths, dayKey, daysBetween, parseDay } from '../../lib/dates';
 import { rub } from '../../lib/money';
 import { visible } from '../../lib/records';
-import { addMonths } from '../../lib/dates';
 import type { BudgetMonth, Income, Spend, Sub } from '../../lib/types';
 
 export type DueStatus = 'overdue' | 'today' | 'soon' | 'later';
@@ -38,10 +37,13 @@ export function dueLabel(d: number) {
   return `через ${days(d)}`;
 }
 
-/** Whole roubles as «5 000 ₽», kopecks only when there are any: «89,99 ₽». */
-export function money(n: number) {
+/** Whole roubles: «5 000 ₽». */
+export const money = rub;
+
+/** With kopecks when there are any, for the lines of a receipt: «89,99 ₽». */
+export function exactMoney(n: number) {
   if (Number.isInteger(Math.round(n * 100) / 100)) return rub(n);
-  return `${n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/\s/g, ' ')} ₽`;
+  return `${n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/\s/g, '\u00a0')}\u00a0₽`;
 }
 
 /** One line of the feed: money that came in or went out. */
@@ -91,41 +93,65 @@ export function txDays(txs: Tx[]): TxDay[] {
 /** `n` months ending with `end`, oldest first. */
 export const monthWindow = (end: string, n: number) => Array.from({ length: n }, (_, i) => addMonths(end, i - n + 1));
 
-export interface MonthTotal {
-  ym: string;
-  income: number;
-  spent: number;
-}
-
-export function monthTotals(incomes: Income[], spends: Spend[], yms: string[]): MonthTotal[] {
-  return yms.map((ym) => {
-    const list = monthTxs(incomes, spends, ym);
-    const sum = (kind: Tx['kind']) => list.filter((t) => t.kind === kind).reduce((s, t) => s + t.amount, 0);
-    return { ym, income: sum('in'), spent: sum('out') };
-  });
-}
-
 /** Income against spending, in percent of the spending; null when nothing was spent. */
 export const incomeVsSpent = (income: number, spent: number) => (spent > 0 ? ((income - spent) / spent) * 100 : null);
 
+/** `n` days ending with `end`, oldest first. */
+export const dayWindow = (end: string, n: number) => Array.from({ length: n }, (_, i) => dayKey(addDays(parseDay(end), i - n + 1)));
+
 /**
- * One curve of the chart. Each value sits in the middle of its month's column; the curve leaves
- * every point flat, so it makes soft hills and never swings past the real values.
+ * The money at the end of each given day, worked back from what is there today. Operations dated
+ * after today have not happened yet and don't count.
  */
-export function chartPaths(values: number[], max: number, w: number, h: number, top: number, bottom: number, floor = 0) {
-  const step = w / Math.max(1, values.length);
-  const xs = values.map((_, i) => step * (i + 0.5));
-  const ys = values.map((v) => bottom - ((v - floor) / Math.max(1, max - floor)) * (bottom - top));
-  const px = [-step / 2, ...xs, w + step / 2];
-  const py = [ys[0] ?? bottom, ...ys, ys[ys.length - 1] ?? bottom];
-  const r = (n: number) => Math.round(n * 10) / 10;
-  let line = `M${r(px[0])} ${r(py[0])}`;
-  for (let i = 1; i < px.length; i++) {
-    const mid = (px[i - 1] + px[i]) / 2;
-    line += `C${r(mid)} ${r(py[i - 1])} ${r(mid)} ${r(py[i])} ${r(px[i])} ${r(py[i])}`;
-  }
-  return { xs, ys, line, area: `${line}L${r(px[px.length - 1])} ${h}L${r(px[0])} ${h}Z` };
+export function balanceSeries(incomes: Income[], spends: Spend[], total: number, ends: string[], today: string): number[] {
+  const moves = [...visible(incomes).map((x) => ({ date: x.date, sum: x.amount })), ...visible(spends).map((x) => ({ date: x.date, sum: -x.amount }))].filter((m) => m.date <= today);
+  return ends.map((end) => total - moves.filter((m) => m.date > end).reduce((t, m) => t + m.sum, 0));
 }
+
+/** Income of today and yesterday; the percent is null when there was nothing yesterday to compare with. */
+export function incomeToday(incomes: Income[], now: Date) {
+  const on = (day: string) => visible(incomes).filter((x) => x.date === day).reduce((t, x) => t + x.amount, 0);
+  const today = on(dayKey(now));
+  const yesterday = on(dayKey(addDays(now, -1)));
+  return { today, yesterday, pct: yesterday > 0 ? ((today - yesterday) / yesterday) * 100 : null };
+}
+
+/**
+ * A smooth curve through the values, `samples` points long. Monotone between neighbours, so it
+ * passes through every value and never swings past them.
+ */
+export function sampleCurve(values: number[], samples: number): number[] {
+  const n = values.length;
+  if (n < 2) return Array.from({ length: samples }, () => values[0] ?? 0);
+  const slope = values.slice(1).map((v, i) => v - values[i]);
+  const tangent = values.map((_, i) => {
+    if (i === 0) return slope[0];
+    if (i === n - 1) return slope[n - 2];
+    return slope[i - 1] * slope[i] <= 0 ? 0 : (2 * slope[i - 1] * slope[i]) / (slope[i - 1] + slope[i]);
+  });
+  return Array.from({ length: samples }, (_, k) => {
+    const at = (k / (samples - 1)) * (n - 1);
+    const i = Math.min(n - 2, Math.floor(at));
+    const t = at - i;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    return (2 * t3 - 3 * t2 + 1) * values[i] + (t3 - 2 * t2 + t) * tangent[i] + (-2 * t3 + 3 * t2) * values[i + 1] + (t3 - t2) * tangent[i + 1];
+  });
+}
+
+/** Softens a curve: each point becomes the average around it, twice over. Sudden jumps turn into slopes. */
+export function blurCurve(values: number[], radius: number): number[] {
+  const pass = (v: number[]) =>
+    v.map((_, i) => {
+      let sum = 0;
+      for (let k = -radius; k <= radius; k++) sum += v[Math.max(0, Math.min(v.length - 1, i + k))];
+      return sum / (radius * 2 + 1);
+    });
+  return pass(pass(values));
+}
+
+/** Colours of the planner's categories, in order: the app's own, not the ones saved with old categories. */
+export const PLAN_TONES = ['#ff4d66', '#b4b0ff', '#ffb199', '#8f86ff', '#ff8fb1', '#7fd6e8', '#ffd98a', '#d8a8ff'];
 
 /** Where each category's arc starts on a ring of 100 units, and how long it is. */
 export function donutSegments(limits: number[]) {

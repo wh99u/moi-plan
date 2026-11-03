@@ -27,17 +27,10 @@ export function parseUsdRate(json: { Date?: string; Valute?: { USD?: { Value?: n
 /** Rouble amount in the chosen currency; dollars only when a rate is known. */
 export const convert = (rub: number, cur: Cur, rate: UsdRate | null) => (cur === 'USD' && rate ? rub / rate.value : rub);
 
+/** Whole roubles or whole dollars, no kopecks and no cents. */
 export function formatMoney(rub: number, cur: Cur, rate: UsdRate | null) {
-  if (cur !== 'USD' || !rate) return money(rub);
-  const text = (rub / rate.value).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/\s/g, ' ');
-  return `${text} $`;
-}
-
-/** The same amount split for big text, where the kopecks are quieter: «78 400», «00», «₽». */
-export function moneyParts(rub: number, cur: Cur, rate: UsdRate | null) {
-  const usd = cur === 'USD' && !!rate;
-  const [int, frac = '00'] = convert(rub, cur, rate).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).split(',');
-  return { int: int.replace(/\s/g, '\u00a0'), frac, sym: usd ? '$' : '₽' };
+  const text = cur !== 'USD' || !rate ? money(rub) : `${Math.round(rub / rate.value).toLocaleString('ru-RU').replace(/\s/g, '\u00a0')}\u00a0$`;
+  return text.replace('-', '\u2212');
 }
 
 function read<T>(key: string): T | null {

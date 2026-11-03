@@ -69,6 +69,14 @@ export function demoState(today = new Date()): StateV4 {
     s.shared.incomes.push(rec({ date: `${m}-10`, amount: income, bankId: s.shared.banks[0].id, source: 'manual' as const }));
     s.shared.spends.push(rec({ ym: m, catId: '', amount: spent, date: `${m}-20`, title: 'Расходы за месяц' }));
   });
+  // The last weeks, day by day, with income today and yesterday.
+  for (let back = 1; back <= 34; back += back % 3 === 0 ? 2 : 1) {
+    const d = dayKey(addDays(today, -back));
+    s.shared.spends.push(rec({ ym: d.slice(0, 7), catId: '', amount: 700 + ((back * 677) % 3200), date: d, title: ['Пятёрочка', 'Кофе', 'Такси', 'Аптека'][back % 4] }));
+  }
+  [[2, 18000], [9, 26000], [16, 22000], [23, 31000], [1, 12000], [0, 12600]].forEach(([back, amount]) => {
+    s.shared.incomes.push(rec({ date: dayKey(addDays(today, -back)), amount, bankId: s.shared.banks[0].id, source: 'shortcut' as const }));
+  });
   const sub = (name: string, icon: string, amount: number, offset: number, catName: string, period: 'month' | 'year' = 'month') =>
     rec({ name, icon, amount, next: dayKey(addDays(today, offset)), period, catName });
   s.shared.subs = [

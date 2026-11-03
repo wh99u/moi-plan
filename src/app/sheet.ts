@@ -9,6 +9,8 @@ export interface SheetData {
   tx?: 'in' | 'out';
   /** The month a new record goes to. */
   ym?: string;
+  /** A receipt photo already picked, to read as soon as the form opens. */
+  file?: File;
 }
 
 let current: { kind: SheetKind; data: SheetData } | null = null;

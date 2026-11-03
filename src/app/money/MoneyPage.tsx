@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../lib/appStore';
-import { addDays, addMonths, dayKey, monthName, parseDay, ymKey } from '../../lib/dates';
+import { addDays, addMonths, dayKey, daysInMonth, fmtDay, monthName, parseDay, ymKey } from '../../lib/dates';
 import { visible } from '../../lib/records';
 import type { Category } from '../../lib/types';
 import { Icon } from '../../ui/Icon';
@@ -10,25 +10,28 @@ import { navigate } from '../route';
 import { openSheet } from '../sheet';
 import { EASE } from '../ui/text';
 import { totalOf } from './account';
+import { Amt } from './Amt';
 import { setNotice, useNotice } from './auto';
-import { Chart } from './Chart';
-import { formatMoney, loadRate, moneyParts, setCurrency, useCurrency } from './currency';
-import { incomeVsSpent, monthTotals, monthTxs, monthWindow, txDays, type Tx } from './logic';
+import { formatMoney, loadRate, setCurrency, useCurrency } from './currency';
+import { balanceSeries, dayWindow, incomeToday, incomeVsSpent, monthTxs, monthWindow, txDays, type Tx } from './logic';
 import './money.css';
+import { pickReceipt } from './scan';
+import { WaveChart, type ChartPoint } from './WaveChart';
 
+const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const HIDDEN_KEY = 'money_hidden';
 const MASK = '••••';
-const CHART_MONTHS = 7;
+const DAYS_SHOWN = 30;
+const MONTHS_SHOWN = 12;
 /** Currency change: the amounts are smeared first, the new ones appear under the smear. */
 const SMEAR_MS = 620;
 const SMEAR_SWAP = 240;
 
 /**
- * The entrance, timed from the user's reference video: the two panels close the gap, the header
- * drifts up, the sum rises from under its edge, then the chart draws, the small things pop in one
- * by one and the lower panel fills from the top.
+ * The entrance: the red top opens, the dark panel lands, the sum counts up, the line rises as a
+ * swell, then the small things pop in one by one and the list fills as it scrolls into view.
  */
-const AT = { panels: 0, head: 0.26, sum: 0.42, chart: 0.56, tiles: 1.02, plaque: 1.2, feedHead: 0.8, rows: 1.3 };
+const AT = { top: 0, head: 0.2, panel: 0.25, sum: 0.45, today: 0.65, chart: 0.5, tabs: 0.95, acts: 0.8, tiles: 1.15, plaque: 1.3, feedHead: 0.9, rows: 1.3 };
 const INTRO_MS = 2400;
 
 const pop = (delay: number) =>
@@ -64,10 +67,14 @@ function useHidden() {
   return [hidden, toggle] as const;
 }
 
+const lastDayOf = (ym: string) => `${ym}-${String(daysInMonth(ym)).padStart(2, '0')}`;
+
 export function MoneyPage() {
-  const nowYm = ymKey(new Date());
+  const now = new Date();
+  const today = dayKey(now);
+  const nowYm = ymKey(now);
   const [ym, setYm] = useState(nowYm);
-  const [end, setEnd] = useState(nowYm);
+  const [mode, setMode] = useState<'days' | 'months'>('days');
   const banks = useStore((s) => visible(s.shared.banks));
   const incomes = useStore((s) => s.shared.incomes);
   const spends = useStore((s) => s.shared.spends);
@@ -102,80 +109,118 @@ export function MoneyPage() {
     );
   };
 
-  /** Choosing a month at the edge of the chart brings its neighbours into view. */
-  const chooseMonth = (next: string) => {
-    const shown = monthWindow(end, CHART_MONTHS);
-    if (next === shown[0]) setEnd(addMonths(end, -3));
-    else if (next === shown[shown.length - 1] && end < nowYm) {
-      const later = addMonths(end, 3);
-      setEnd(later > nowYm ? nowYm : later);
-    }
-    setYm(next);
-  };
+  const total = totalOf(banks);
+  const show = (rub: number) => (hidden ? MASK : formatMoney(rub, cur, rate));
 
-  const totals = monthTotals(incomes, spends, monthWindow(end, CHART_MONTHS));
+  const points = useMemo<ChartPoint[]>(() => {
+    if (mode === 'days') {
+      const end = ym === nowYm ? today : lastDayOf(ym);
+      const days = dayWindow(end, DAYS_SHOWN);
+      const values = balanceSeries(incomes, spends, total, days, today);
+      return days.map((d, i) => ({ key: d, label: fmtDay(d), value: values[i] }));
+    }
+    const end = ym > addMonths(nowYm, 1 - MONTHS_SHOWN) ? nowYm : ym;
+    const months = monthWindow(end, MONTHS_SHOWN);
+    const values = balanceSeries(incomes, spends, total, months.map((m) => (m === nowYm ? today : lastDayOf(m))), today);
+    return months.map((m, i) => ({ key: m, label: capital(monthName(m)), value: values[i] }));
+  }, [mode, ym, nowYm, today, incomes, spends, total]);
+
   const txs = monthTxs(incomes, spends, ym);
   const income = txs.filter((t) => t.kind === 'in').reduce((s, t) => s + t.amount, 0);
   const spent = txs.filter((t) => t.kind === 'out').reduce((s, t) => s + t.amount, 0);
-  const net = income - spent;
-  const total = totalOf(banks);
-  const show = (rub: number) => (hidden ? MASK : formatMoney(rub, cur, rate));
-  const dollars = cur === 'USD' && !!rate;
-  const change = rate ? rate.value - rate.previous : 0;
   const cats = month?.cats ?? [];
-
-  const big = (rub: number) => {
-    if (hidden) return <span className="b-amt">{MASK}</span>;
-    const p = moneyParts(rub, cur, rate);
-    return (
-      <span className="b-amt">
-        {p.int}
-        <span className="b-frac">
-          ,{p.frac}
-          {' '}
-          {p.sym}
-        </span>
-      </span>
-    );
-  };
+  const scanNew = () => void pickReceipt().then((file) => file && openSheet('tx', { ym, file }));
 
   return (
     <div className={`money${smearing ? ' is-smearing' : ''}`}>
-      <motion.section
-        className="b-stage"
-        initial={{ clipPath: 'inset(0% 0% 42% 0% round 0px 0px 32px 32px)' }}
-        animate={{ clipPath: 'inset(0% 0% 0% 0% round 0px 0px 32px 32px)', transitionEnd: { clipPath: 'none' } }}
-        transition={{ delay: AT.panels, duration: 0.6, ease: EASE }}
-      >
-        <Bar />
-        <div className="b-total">
-          <motion.div className="b-total-label t-body" {...drift(AT.head, 30)}>
-            <span>На счёте</span>
-            <button type="button" className="b-eye" aria-label={hidden ? 'Показать суммы' : 'Скрыть суммы'} aria-pressed={hidden} onClick={toggleHidden}>
-              <Icon name={hidden ? 'eyeOff' : 'eye'} size={17} />
-            </button>
+      <section className="b-stage">
+        <div className="b-hero">
+          <motion.div className="b-top" initial={{ scaleY: 0.45, opacity: 0.4 }} animate={{ scaleY: 1, opacity: 1 }} transition={{ delay: AT.top, duration: 0.7, ease: EASE }}>
+            <span className="b-top-glow" />
+            <span className="b-top-glow b-top-glow--2" />
           </motion.div>
-          <div className="b-total-row">
+
+          <Bar />
+
+          <motion.div className="b-panel" initial={{ opacity: 0, y: 40, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ delay: AT.panel, type: 'spring', stiffness: 190, damping: 24 }}>
+            <div className="b-panel-head">
+              <div className="b-total-label t-body">
+                <span>На счёте</span>
+                <button type="button" className="b-eye" aria-label={hidden ? 'Показать суммы' : 'Скрыть суммы'} aria-pressed={hidden} onClick={toggleHidden}>
+                  <Icon name={hidden ? 'eyeOff' : 'eye'} size={17} />
+                </button>
+              </div>
+              <motion.div className="b-cur" {...pop(AT.sum + 0.2)}>
+                {rate && <span className="t-caption b-quiet t-num">1 $ = {rate.value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽</span>}
+                <motion.button type="button" className="b-cur-btn" aria-label={cur === 'USD' ? 'Показать в рублях' : 'Показать в долларах'} onClick={() => void flipCurrency()} whileTap={{ scale: 0.84 }}>
+                  <span className="b-amt">{cur === 'USD' && rate ? '$' : '₽'}</span>
+                </motion.button>
+              </motion.div>
+            </div>
+
             <div className="b-sum-clip">
-              <motion.button type="button" className="b-sum t-num" aria-label="Изменить сумму на счёте" onClick={() => openSheet('balance')} initial={{ y: '105%' }} animate={{ y: '0%' }} transition={{ delay: AT.sum, duration: 0.55, ease: EASE }}>
-                {big(total)}
+              <motion.button type="button" className="b-sum" aria-label="Изменить сумму на счёте" onClick={() => openSheet('balance')} initial={{ y: '105%' }} animate={{ y: '0%' }} transition={{ delay: AT.sum, duration: 0.55, ease: EASE }}>
+                <Amt rub={total} hidden={hidden} delay={AT.sum} />
               </motion.button>
             </div>
-            <motion.div {...pop(AT.sum + 0.2)}>
-              <motion.button type="button" className="round-btn b-cur-btn" aria-label={dollars ? 'Показать в рублях' : 'Показать в долларах'} onClick={() => void flipCurrency()} whileTap={{ scale: 0.86 }}>
-                <span className="b-amt">{dollars ? '$' : '₽'}</span>
-              </motion.button>
-            </motion.div>
-          </div>
-          {rate && (
-            <motion.p className="t-caption b-quiet b-rate t-num" {...drift(AT.sum + 0.3, 6)}>
-              1 $ = {formatMoney(rate.value, 'RUB', null)}
-              {change !== 0 && ` (${change > 0 ? '+' : '−'}${Math.abs(change).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} за день)`}
-            </motion.p>
-          )}
-        </div>
 
-        <Chart months={totals} selected={ym} onSelect={chooseMonth} bubble={hidden ? MASK : `${net < 0 ? '−' : net > 0 ? '+' : ''}${formatMoney(Math.abs(net), cur, rate)}`} delay={AT.chart} />
+            <motion.div {...drift(AT.today, 8)}>
+              <TodayLine incomes={incomes} show={show} hidden={hidden} />
+            </motion.div>
+
+            <WaveChart points={points} delay={AT.chart} format={show} onPick={mode === 'months' ? (p) => setYm(p.key) : undefined} />
+
+            <motion.div className="b-panel-foot" {...drift(AT.tabs, 8)}>
+              <div className="b-tabs" role="group" aria-label="Период графика">
+                {(
+                  [
+                    ['days', 'Дни'],
+                    ['months', 'Месяцы'],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button key={id} type="button" className={`b-tab t-caption${mode === id ? ' is-on' : ''}`} aria-pressed={mode === id} onClick={() => setMode(id)}>
+                    {mode === id && <motion.span layoutId="b-tab-pill" className="b-tab-pill" transition={{ type: 'spring', stiffness: 460, damping: 34 }} />}
+                    <span className="b-tab-text">{label}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="b-month">
+                <button type="button" className="b-month-btn" aria-label="Предыдущий месяц" onClick={() => setYm(addMonths(ym, -1))}>
+                  <Icon name="back" size={15} stroke={2.2} />
+                </button>
+                <span className="b-month-name t-caption">
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    <motion.span key={ym} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25, ease: EASE }}>
+                      {capital(monthName(ym))}
+                      {ym.slice(0, 4) === nowYm.slice(0, 4) ? '' : ` ${ym.slice(0, 4)}`}
+                    </motion.span>
+                  </AnimatePresence>
+                </span>
+                <button type="button" className="b-month-btn" aria-label="Следующий месяц" disabled={ym >= nowYm} onClick={() => setYm(addMonths(ym, 1))}>
+                  <Icon name="chevron" size={15} stroke={2.2} />
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+
+          <div className="b-acts">
+            {[
+              { icon: 'plus', label: 'Операция', go: () => openSheet('tx', { ym }), main: true },
+              { icon: 'receipt', label: 'Чек', go: scanNew },
+              { icon: 'pie', label: 'План', go: () => navigate('plan') },
+              { icon: 'bolt', label: 'Авто', go: () => openSheet('auto') },
+            ].map((a, i) => (
+              <motion.div key={a.label} {...pop(AT.acts + i * 0.08)}>
+                <motion.button type="button" className={`b-act${a.main ? ' is-main' : ''}`} onClick={a.go} whileTap={{ scale: 0.92 }}>
+                  <span className="b-act-icon" style={{ animationDelay: `${i * 0.45}s` }}>
+                    <Icon name={a.icon} size={22} stroke={1.9} />
+                  </span>
+                  <span className="t-caption">{a.label}</span>
+                </motion.button>
+              </motion.div>
+            ))}
+          </div>
+        </div>
 
         <div className="b-pad">
           <div className="b-tiles">
@@ -183,32 +228,37 @@ export function MoneyPage() {
               <span className="b-tile-icon is-in">
                 <Icon name="plus" size={18} stroke={2.2} />
               </span>
-              <span className="b-tile-sum t-num">{big(income)}</span>
+              <span className="b-tile-sum">
+                <Amt rub={income} hidden={hidden} delay={AT.tiles} />
+              </span>
               <span className="t-caption b-quiet">Доходы за {monthName(ym)}</span>
             </motion.div>
             <motion.div className="b-tile" {...pop(AT.tiles + 0.08)}>
               <span className="b-tile-icon is-out">
                 <Icon name="minus" size={18} stroke={2.2} />
               </span>
-              <span className="b-tile-sum t-num">{big(spent)}</span>
+              <span className="b-tile-sum">
+                <Amt rub={spent} hidden={hidden} delay={AT.tiles + 0.08} />
+              </span>
               <span className="t-caption b-quiet">Расходы за {monthName(ym)}</span>
             </motion.div>
           </div>
 
           <motion.div {...pop(AT.plaque)}>
-            <Plaque income={income} spent={spent} monthName={monthName(ym)} />
+            <Plaque income={income} spent={spent} name={monthName(ym)} />
           </motion.div>
         </div>
-      </motion.section>
+      </section>
 
       <NoticeBar />
 
-      <motion.section className="b-feed" initial={{ y: 180 }} animate={{ y: 0 }} transition={{ delay: AT.panels, duration: 0.65, ease: EASE }}>
+      <motion.section className="b-feed" initial={{ y: 180 }} animate={{ y: 0 }} transition={{ duration: 0.65, ease: EASE }}>
         {!txs.length ? (
           <motion.div key={ym} className="b-empty" {...(intro ? drift(AT.feedHead) : { initial: { opacity: 0 }, animate: { opacity: 1 } })}>
             <h2 className="t-title">Операции за {monthName(ym)}</h2>
             <p className="t-body muted b-empty-text">Здесь будет всё, что ты получил и потратил за этот месяц. Добавь первую операцию, и она появится в списке.</p>
             <motion.button type="button" className="b-add-big" aria-label="Добавить операцию" onClick={() => openSheet('tx', { ym })} whileTap={{ scale: 0.88 }}>
+              <span className="b-add-ring" />
               <Icon name="plus" size={30} />
             </motion.button>
             <span className="t-caption muted">Добавить</span>
@@ -217,9 +267,9 @@ export function MoneyPage() {
           <>
             <motion.div className="b-feed-head" {...drift(AT.feedHead)}>
               <h2 className="t-title">Операции за {monthName(ym)}</h2>
-              <button type="button" className="m-round b-feed-add" aria-label="Добавить операцию" onClick={() => openSheet('tx', { ym })}>
+              <motion.button type="button" className="m-round b-feed-add" aria-label="Добавить операцию" onClick={() => openSheet('tx', { ym })} whileTap={{ scale: 0.86 }}>
                 <Icon name="plus" size={20} />
-              </button>
+              </motion.button>
             </motion.div>
             <Feed key={ym} txs={txs} cats={cats} show={show} intro={intro} />
           </>
@@ -240,15 +290,10 @@ function Bar() {
   const { name, picture } = useProfile();
   return (
     <header className="b-bar">
-      <motion.div {...pop(AT.head + 0.3)}>
-        <motion.button type="button" className="round-btn" aria-label="Автодобавление операций" onClick={() => openSheet('auto')} whileTap={{ scale: 0.86 }}>
-          <Icon name="bolt" size={19} />
-        </motion.button>
-      </motion.div>
-      <motion.h1 className="t-headline" {...drift(AT.head, 30)}>
+      <motion.h1 className="t-title" {...drift(AT.head, 24)}>
         Бюджет
       </motion.h1>
-      <motion.div {...pop(AT.head + 0.38)}>
+      <motion.div {...pop(AT.head + 0.3)}>
         <motion.button type="button" className="round-btn avatar" aria-label="Профиль" onClick={() => openSheet('profile')} whileTap={{ scale: 0.86 }}>
           {picture ? <img src={picture} alt="" referrerPolicy="no-referrer" /> : name ? <span>{name[0].toUpperCase()}</span> : <Icon name="user" size={19} />}
         </motion.button>
@@ -257,15 +302,32 @@ function Bar() {
   );
 }
 
+/** Today's income against yesterday's. */
+function TodayLine({ incomes, show, hidden }: { incomes: Parameters<typeof incomeToday>[0]; show: (rub: number) => string; hidden: boolean }) {
+  const { today, pct } = incomeToday(incomes, new Date());
+  if (pct === null && !today) return <p className="b-today t-caption b-quiet">Сегодня пополнений не было</p>;
+  const down = pct !== null && pct < 0;
+  return (
+    <p className="b-today t-caption">
+      <span className={`b-today-arrow${down ? ' is-down' : ''}`}>
+        <Icon name="arrowRight" size={14} stroke={2.6} />
+      </span>
+      <span className={`t-num ${down ? 'b-minus' : 'b-plus'}`}>{pct === null ? `+${show(today)}` : `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct).toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%`}</span>
+      <span className="b-quiet">{pct === null ? 'сегодня' : hidden ? 'к вчера' : 'к вчерашнему доходу'}</span>
+    </p>
+  );
+}
+
 /** How income relates to spending in the chosen month; opens the planner. */
-function Plaque({ income, spent, monthName: name }: { income: number; spent: number; monthName: string }) {
+function Plaque({ income, spent, name }: { income: number; spent: number; name: string }) {
   const pct = incomeVsSpent(income, spent);
   const text = pct === null ? (income ? `Расходов за ${name} нет` : `За ${name} операций нет`) : pct > 0 ? 'Доход выше расхода' : pct < 0 ? 'Доход ниже расхода' : 'Доход равен расходу';
   return (
     <motion.button type="button" className="b-plaque" aria-label="Открыть планировщик бюджета" onClick={() => navigate('plan')} whileTap={{ scale: 0.97 }}>
+      <span className="b-plaque-sheen" aria-hidden="true" />
       <span className="b-plaque-text">
         <span className="b-plaque-pct t-num">
-          {pct === null ? '—' : `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct).toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%`}
+          {pct === null ? '—' : `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.round(Math.abs(pct))}%`}
           {!!pct && (
             <span className={`b-plaque-arrow${pct < 0 ? ' is-down' : ''}`}>
               <Icon name="arrowRight" size={17} stroke={2.4} />
@@ -276,7 +338,9 @@ function Plaque({ income, spent, monthName: name }: { income: number; spent: num
       </span>
       <span className="b-plaque-go">
         <span className="t-caption">Планировщик</span>
-        <Icon name="chevron" size={20} stroke={2.2} />
+        <span className="b-plaque-chev">
+          <Icon name="chevron" size={20} stroke={2.2} />
+        </span>
       </span>
     </motion.button>
   );
@@ -296,7 +360,7 @@ function Feed({ txs, cats, show, intro }: { txs: Tx[]; cats: Category[]; show: (
           <ul className="b-list">
             <AnimatePresence initial={true}>
               {d.list.map((t) => (
-                <Row key={t.id} tx={t} catName={cats.find((c) => c.id === t.catId)?.name} show={show} delay={intro ? AT.rows + Math.min(n++, 8) * 0.06 : 0} />
+                <Row key={t.id} tx={t} catName={cats.find((c) => c.id === t.catId)?.name} show={show} delay={intro ? AT.rows + Math.min(n++, 6) * 0.06 : 0} />
               ))}
             </AnimatePresence>
           </ul>
@@ -310,8 +374,14 @@ function Row({ tx, catName, show, delay }: { tx: Tx; catName?: string; show: (ru
   const plus = tx.kind === 'in';
   const sub = plus ? (tx.title === 'Пополнение' ? '' : 'Пополнение') : `${catName ?? 'Расход'}${tx.lines ? `, в чеке позиций: ${tx.lines}` : ''}`;
   return (
-    <motion.li initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} transition={{ delay, duration: 0.45, ease: EASE }}>
-      <button type="button" className="b-row" onClick={() => openSheet('txView', { id: tx.id, tx: tx.kind })}>
+    <motion.li
+      initial={{ opacity: 0, y: 18, x: -8 }}
+      whileInView={{ opacity: 1, y: 0, x: 0 }}
+      viewport={{ once: true, margin: '-10px' }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={{ delay, duration: 0.5, ease: EASE }}
+    >
+      <motion.button type="button" className="b-row" onClick={() => openSheet('txView', { id: tx.id, tx: tx.kind })} whileTap={{ scale: 0.98 }}>
         <span className={`b-row-icon${plus ? ' is-in' : ''}`} aria-hidden="true">
           {plus ? <Icon name="plus" size={18} stroke={2.2} /> : <span className="t-headline">{tx.title[0].toUpperCase()}</span>}
         </span>
@@ -332,7 +402,7 @@ function Row({ tx, catName, show, delay }: { tx: Tx; catName?: string; show: (ru
           {plus ? '+' : '−'}
           {show(tx.amount)}
         </span>
-      </button>
+      </motion.button>
     </motion.li>
   );
 }

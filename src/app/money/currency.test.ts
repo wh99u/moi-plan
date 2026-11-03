@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { convert, formatMoney, moneyParts, parseUsdRate } from './currency';
+import { convert, formatMoney, parseUsdRate } from './currency';
 
 const rate = { value: 80, previous: 79.5, date: '2026-11-03' };
 
@@ -18,15 +18,17 @@ describe('amounts', () => {
     expect(formatMoney(1500, 'RUB', rate)).toBe('1 500 ₽');
     expect(convert(1500, 'RUB', rate)).toBe(1500);
   });
-  test('dollars by the rate, with cents', () => {
-    expect(formatMoney(8000, 'USD', rate)).toBe('100,00 $');
-    expect(formatMoney(100000, 'USD', rate)).toBe('1 250,00 $');
+  test('a debt has a real minus', () => {
+    expect(formatMoney(-1500, 'RUB', rate)).toBe('−1 500 ₽');
+    expect(formatMoney(-8000, 'USD', rate)).toBe('−100 $');
+  });
+  test('whole dollars by the rate', () => {
+    expect(formatMoney(8040, 'USD', rate)).toBe('101\u00a0$');
+    expect(formatMoney(100000, 'USD', rate)).toBe('1\u00a0250\u00a0$');
     expect(convert(8000, 'USD', rate)).toBe(100);
   });
-  test('split for big text', () => {
-    expect(moneyParts(78400.5, 'RUB', rate)).toEqual({ int: '78\u00a0400', frac: '50', sym: '₽' });
-    expect(moneyParts(8000, 'USD', rate)).toEqual({ int: '100', frac: '00', sym: '$' });
-    expect(moneyParts(1500, 'USD', null)).toEqual({ int: '1\u00a0500', frac: '00', sym: '₽' });
+  test('no kopecks in roubles', () => {
+    expect(formatMoney(1500.6, 'RUB', rate)).toBe('1\u00a0501\u00a0₽');
   });
   test('without a rate everything stays in roubles', () => {
     expect(formatMoney(1500, 'USD', null)).toBe('1 500 ₽');

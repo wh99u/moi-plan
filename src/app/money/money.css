@@ -19,6 +19,7 @@
   --b-in: #b4b0ff;
   --b-out: #ff4d66;
   --b-feed-plus: #b4b0ff;
+  --b-panel: #0b0708;
 }
 [data-theme='light'] .money,
 [data-theme='light'] .plan {
@@ -50,13 +51,13 @@
     opacity: 1;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .is-smearing .b-amt {
-    animation: none;
-  }
+.b-sym {
+  margin-left: 0.22em;
+  font-weight: 400;
+  opacity: 0.62;
 }
 
-/* ───────── the dark stage ───────── */
+/* ───────── the red top and the dark panel on it ───────── */
 .b-stage {
   position: relative;
   padding-bottom: 16px;
@@ -66,28 +67,69 @@
   overflow: hidden;
   isolation: isolate;
 }
+.b-hero {
+  position: relative;
+  padding-bottom: 4px;
+}
+/* The buttons below the panel sit half on the red, half on the dark. */
+.b-top {
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 52px;
+  overflow: hidden;
+  transform-origin: top;
+  border-radius: 0 0 34px 34px;
+  background: linear-gradient(165deg, #f0304f, #c8102e 55%, #8f0b23);
+}
+.b-top-glow {
+  position: absolute;
+  width: 72%;
+  aspect-ratio: 1;
+  left: -18%;
+  top: -24%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 170, 170, 0.55), transparent);
+  animation: b-drift 11s ease-in-out infinite alternate;
+}
+.b-top-glow--2 {
+  left: auto;
+  right: -24%;
+  top: 34%;
+  background: radial-gradient(closest-side, rgba(90, 6, 40, 0.75), transparent);
+  animation-duration: 14s;
+  animation-direction: alternate-reverse;
+}
+@keyframes b-drift {
+  to {
+    transform: translate(38%, 22%) scale(1.25);
+  }
+}
 .b-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: calc(var(--sat) + 14px) var(--gutter) 0;
+  padding: calc(var(--sat) + 12px) var(--gutter) 0;
 }
-.b-total {
-  margin-top: 20px;
-  padding: 0 var(--gutter);
+.b-panel {
+  position: relative;
+  margin: 12px 12px 0;
+  padding-top: 16px;
+  border-radius: 30px;
+  background: var(--b-panel);
+  box-shadow: 0 18px 40px -18px rgba(40, 0, 10, 0.8);
+}
+.b-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
 }
 .b-total-label {
   display: flex;
   align-items: center;
   gap: 4px;
   color: var(--hero-text-2);
-}
-.b-total-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
 }
 .b-quiet {
   color: var(--hero-text-2);
@@ -100,119 +142,224 @@
   border-radius: 50%;
   color: var(--hero-text-2);
 }
+.b-cur {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.b-cur-btn {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--hero-text);
+  background: rgba(255, 240, 243, 0.09);
+}
 /* The sum rises from behind this edge; the padding keeps the smear from being cut. */
 .b-sum-clip {
-  flex: 1;
-  min-width: 0;
   overflow: hidden;
-  padding: 4px 0;
+  padding: 2px 16px;
 }
 .b-sum {
   display: block;
   color: inherit;
   text-align: left;
   white-space: nowrap;
-  font-size: clamp(34px, 10.8vw, 48px);
-  line-height: 1.08;
+  font-size: clamp(36px, 11.5vw, 50px);
+  line-height: 1.1;
   font-weight: 600;
   letter-spacing: -0.04em;
 }
-.b-frac {
-  color: var(--hero-text-2);
-  font-weight: 500;
+.b-today {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 20px;
+  padding: 0 16px;
 }
-.b-cur-btn {
-  flex: none;
-  font-size: 18px;
+.b-plus {
+  color: #5fe3a1;
   font-weight: 600;
 }
-.b-rate {
-  margin-top: 2px;
+.b-minus {
+  color: #ff7d90;
+  font-weight: 600;
+}
+.b-today-arrow {
+  display: grid;
+  color: #5fe3a1;
+  rotate: -90deg;
+  animation: b-nudge 1.6s ease-in-out infinite;
+}
+.b-today-arrow.is-down {
+  color: #ff7d90;
+  rotate: 90deg;
+}
+@keyframes b-nudge {
+  50% {
+    transform: translateX(3px);
+  }
 }
 
 /* ───────── the chart ───────── */
-.b-chart {
+.b-wave {
   position: relative;
-  margin-top: 8px;
+  margin-top: 2px;
+  touch-action: pan-y;
+  cursor: crosshair;
+  user-select: none;
+  -webkit-user-select: none;
 }
-.b-chart-svg {
-  position: absolute;
-  inset: 0 0 auto;
-  display: block;
-}
-.b-chart-overlay {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.b-chart-band {
-  position: absolute;
-  left: 0;
-  bottom: 34px;
-  width: 34px;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.16), transparent);
-}
-.b-chart-dot {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2.5px solid var(--hero-bg);
-}
-.b-chart-dot--in {
-  background: var(--b-in);
-}
-.b-chart-dot--out {
-  background: var(--b-out);
-}
-/* A zero-width anchor, so the bubble centres on it whatever its width. */
-.b-chart-bubble-at {
+.b-wave-at {
   position: absolute;
   left: 0;
   top: 0;
   width: 0;
-  display: flex;
-  justify-content: center;
-}
-.b-chart-bubble {
-  flex: none;
-  padding: 7px 12px;
-  border-radius: 12px;
-  white-space: nowrap;
-  font-weight: 650;
-  color: #14122b;
-  background: var(--b-in);
-}
-.b-chart-bubble.is-minus {
-  color: #fff;
-  background: var(--b-out);
-}
-.b-chart-months {
-  position: absolute;
-  inset: 0;
-  display: grid;
-}
-.b-chart-month {
+  height: 0;
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding-bottom: 8px;
-  color: var(--hero-text-2);
-  transition: color 0.25s;
+  pointer-events: none;
 }
-.b-chart-month.is-on {
-  color: var(--b-in);
+.b-wave-bubble {
+  flex: none;
+  display: grid;
+  justify-items: center;
+  padding: 5px 11px;
+  border-radius: 12px;
+  white-space: nowrap;
   font-weight: 650;
+  color: #1c0c10;
+  background: #fff;
+  box-shadow: 0 8px 22px -6px rgba(0, 0, 0, 0.7);
+}
+.b-wave-date {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(28, 12, 16, 0.6);
+}
+.b-panel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 12px;
+}
+.b-tabs {
+  display: flex;
+}
+.b-tab {
+  position: relative;
+  height: 34px;
+  padding: 0 13px;
+  border-radius: var(--r-pill);
+  color: var(--hero-text-2);
+  transition: color 0.2s;
+}
+.b-tab.is-on {
+  color: #fff;
+}
+.b-tab-pill {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-pill);
+  background: rgba(255, 240, 243, 0.12);
+}
+.b-tab-text {
+  position: relative;
+}
+.b-month {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  color: var(--hero-text);
+}
+.b-month-btn {
+  width: 26px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: var(--hero-text-2);
+}
+.b-month-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.b-month-name {
+  min-width: 62px;
+  display: inline-block;
+  overflow: hidden;
+  text-align: center;
+}
+.b-month-name > span {
+  display: inline-block;
+}
+
+/* ───────── the buttons ───────── */
+.b-acts {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: -4px 12px 0;
+  padding: 6px;
+  border-radius: 26px;
+  background: var(--b-panel);
+}
+.b-act {
+  position: relative;
+  width: 100%;
+  height: 84px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  overflow: hidden;
+  border-radius: 20px;
+  color: var(--hero-text);
+  background: #181113;
+}
+.b-act.is-main {
+  color: #fff;
+  background: linear-gradient(150deg, #ff4d66, #d6223f);
+}
+/* A slow pass of light keeps the main button awake. */
+.b-act.is-main::after {
+  content: '';
+  position: absolute;
+  inset: 0 -60%;
+  background: linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.35) 50%, transparent 58%);
+  animation: b-pass 4.5s ease-in-out infinite;
+}
+@keyframes b-pass {
+  0%,
+  55% {
+    transform: translateX(-60%);
+  }
+  100% {
+    transform: translateX(60%);
+  }
+}
+.b-act-icon {
+  display: grid;
+  animation: b-float 3.2s ease-in-out infinite;
+}
+@keyframes b-float {
+  50% {
+    transform: translateY(-3px);
+  }
 }
 
 /* ───────── tiles and the plaque ───────── */
 .b-pad {
   display: grid;
   gap: 10px;
-  margin-top: 12px;
-  padding: 0 var(--gutter);
+  margin-top: 10px;
+  padding: 0 12px;
 }
 .b-tiles {
   display: grid;
@@ -236,6 +383,7 @@
   place-items: center;
   border-radius: 50%;
   color: #14122b;
+  animation: b-breathe 3.4s ease-in-out infinite;
 }
 .b-tile-icon.is-in {
   background: var(--b-in);
@@ -243,16 +391,23 @@
 .b-tile-icon.is-out {
   color: #fff;
   background: var(--b-out);
+  animation-delay: 0.9s;
+}
+@keyframes b-breathe {
+  50% {
+    transform: scale(1.09);
+  }
 }
 .b-tile-sum {
   overflow: hidden;
   white-space: nowrap;
-  font-size: clamp(16px, 5vw, 21px);
+  font-size: clamp(18px, 5.4vw, 23px);
   line-height: 1.25;
   font-weight: 600;
   letter-spacing: -0.025em;
 }
 .b-plaque {
+  position: relative;
   width: 100%;
   min-height: 62px;
   padding: 11px 14px;
@@ -260,12 +415,29 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  overflow: hidden;
   border-radius: 20px;
   text-align: left;
   color: #14122b;
-  background:
-    linear-gradient(115deg, transparent 58%, rgba(255, 255, 255, 0.16) 58%, rgba(255, 255, 255, 0.16) 74%, transparent 74%),
-    linear-gradient(100deg, #c9c6ff, #9b96f5);
+  background: linear-gradient(100deg, #c9c6ff, #9b96f5);
+}
+.b-plaque-sheen {
+  position: absolute;
+  inset: 0 -50%;
+  background: linear-gradient(115deg, transparent 44%, rgba(255, 255, 255, 0.28) 44%, rgba(255, 255, 255, 0.28) 56%, transparent 56%);
+  animation: b-sheen 7s ease-in-out infinite alternate;
+}
+@keyframes b-sheen {
+  from {
+    transform: translateX(-22%);
+  }
+  to {
+    transform: translateX(24%);
+  }
+}
+.b-plaque-text,
+.b-plaque-go {
+  position: relative;
 }
 .b-plaque-text {
   min-width: 0;
@@ -284,6 +456,7 @@
 .b-plaque-arrow {
   display: grid;
   rotate: -90deg;
+  animation: b-nudge 1.6s ease-in-out infinite;
 }
 .b-plaque-arrow.is-down {
   rotate: 90deg;
@@ -294,6 +467,10 @@
   align-items: center;
   gap: 2px;
   font-weight: 600;
+}
+.b-plaque-chev {
+  display: grid;
+  animation: b-nudge 1.6s 0.3s ease-in-out infinite;
 }
 
 /* ───────── what just happened ───────── */
@@ -351,6 +528,7 @@
   margin-bottom: 18px;
 }
 .b-add-big {
+  position: relative;
   width: 76px;
   height: 76px;
   display: grid;
@@ -359,6 +537,23 @@
   color: var(--text);
   background: var(--fill);
   box-shadow: inset 0 0 0 1px var(--card-line);
+}
+.b-add-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--accent-hi);
+  animation: b-ring 2.4s ease-out infinite;
+}
+@keyframes b-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  to {
+    transform: scale(1.45);
+    opacity: 0;
+  }
 }
 .b-day {
   margin-top: 18px;
@@ -558,7 +753,7 @@
   color: var(--text-3);
 }
 
-/* Choosing a colour and a mark */
+/* Choosing a category and a mark */
 .b-chips {
   display: flex;
   gap: 8px;
@@ -601,43 +796,23 @@
 }
 
 /* ───────── the planner ───────── */
-.plan {
-  padding: 0 var(--gutter);
-}
-.plan-bar {
-  padding-left: 0;
-  padding-right: 0;
+.plan-hero .b-top {
+  inset: 0 0 96px;
 }
 .plan-bar-side {
-  width: 46px;
+  width: 42px;
 }
-.b-month {
-  display: flex;
-  align-items: center;
-  height: 42px;
-  padding: 0 2px;
-  border-radius: var(--r-pill);
-  background: var(--fill);
-}
-.b-month-btn {
-  width: 34px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  color: var(--text-2);
-}
-.b-month-name {
-  min-width: 64px;
-  text-align: center;
+.plan-panel {
+  padding: 12px 14px 14px;
 }
 .plan-month {
   width: fit-content;
-  margin: 14px auto 0;
+  margin: 0 auto;
 }
 .plan-ring {
   position: relative;
-  width: min(68vw, 260px);
-  margin: 18px auto 0;
+  width: min(62vw, 240px);
+  margin: 6px auto 0;
   aspect-ratio: 1;
 }
 .plan-ring svg {
@@ -645,10 +820,23 @@
   width: 100%;
   height: 100%;
 }
-.plan-ring-track {
+.plan-ring-track,
+.plan-ring-inner,
+.plan-ring-spent {
   fill: none;
-  stroke: var(--fill);
-  stroke-width: 9;
+}
+.plan-ring-track {
+  stroke: rgba(255, 240, 243, 0.07);
+  stroke-width: 7;
+}
+.plan-ring-inner {
+  stroke: rgba(255, 240, 243, 0.07);
+  stroke-width: 1.6;
+}
+.plan-ring-spent {
+  stroke: #fff;
+  stroke-width: 1.6;
+  stroke-linecap: round;
 }
 .plan-ring-text {
   position: absolute;
@@ -657,61 +845,69 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  padding: 0 18%;
+  gap: 1px;
+  padding: 0 20%;
   text-align: center;
 }
 .plan-ring-sum {
-  font-size: clamp(22px, 6.6vw, 30px);
+  white-space: nowrap;
+  font-size: clamp(21px, 6.2vw, 28px);
   line-height: 1.15;
   font-weight: 650;
   letter-spacing: -0.03em;
 }
 .plan-ring-sum.is-over,
 .plan-over {
-  color: var(--accent-hi);
+  color: #ff7d90;
 }
-.plan-tiles {
-  margin-top: 18px;
+.plan-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
 }
-.plan-tile {
-  gap: 2px;
-  color: var(--text);
-  background: var(--card);
-  box-shadow: inset 0 0 0 1px var(--card-line);
+.plan-stat {
+  min-width: 0;
+  padding: 11px 13px;
+  display: grid;
+  gap: 1px;
+  border-radius: 18px;
+  text-align: left;
+  color: var(--hero-text);
+  background: rgba(255, 240, 243, 0.07);
 }
-.plan-head {
-  margin: 24px 0 10px;
+.plan-feed {
+  margin-top: 8px;
 }
 .plan-empty {
   display: grid;
   gap: 10px;
+  margin-top: 12px;
 }
 .plan-empty .ghost-btn {
   margin-top: 0;
 }
 .plan-list {
-  margin: 0;
+  margin: 12px 0 0;
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 .plan-cat {
   width: 100%;
-  padding: 14px;
+  padding: 12px;
   display: grid;
-  gap: 8px;
-  border-radius: 22px;
+  gap: 10px;
+  border-radius: 20px;
   text-align: left;
   color: var(--text);
-  background: var(--card);
-  box-shadow: inset 0 0 0 1px var(--card-line);
+  background: var(--fill);
 }
 .plan-cat-top {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 11px;
 }
 .plan-cat-icon {
   flex: none;
@@ -720,52 +916,72 @@
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: var(--fill);
 }
 .plan-cat-name {
   flex: 1;
   min-width: 0;
   display: grid;
 }
-.plan-cat-limit {
+.plan-cat-name > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-cat-left {
   flex: none;
+  display: grid;
+  justify-items: end;
 }
-.plan-cat-foot {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-}
-.plan-bar-track {
+.plan-track {
   display: block;
-  height: 9px;
+  height: 6px;
   border-radius: var(--r-pill);
-  background: var(--fill);
+  background: var(--fill-2);
   overflow: hidden;
 }
-.plan-bar-fill {
+.plan-fill {
+  position: relative;
   display: block;
   height: 100%;
+  overflow: hidden;
   border-radius: var(--r-pill);
   transform-origin: left;
+}
+.plan-fill.is-over {
+  background: var(--accent-hi);
+}
+/* Light keeps running along each bar. */
+.plan-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  animation: b-run 2.8s ease-in-out infinite;
+}
+@keyframes b-run {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
 }
 .plan-loose {
   padding: 4px 2px;
 }
-.plan-new {
-  position: sticky;
-  z-index: 3;
-  bottom: calc(var(--dock-h) + var(--dock-gap) + 10px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: fit-content;
-  height: 50px;
-  margin: 16px auto 0;
-  padding: 0 22px;
-  border-radius: var(--r-pill);
-  font-weight: 600;
-  color: #fff;
-  background: var(--accent);
-  box-shadow: 0 12px 30px -10px rgba(214, 34, 63, 0.7);
+
+@media (prefers-reduced-motion: reduce) {
+  .is-smearing .b-amt,
+  .b-top-glow,
+  .b-today-arrow,
+  .b-act-icon,
+  .b-act.is-main::after,
+  .b-tile-icon,
+  .b-plaque-sheen,
+  .b-plaque-arrow,
+  .b-plaque-chev,
+  .b-add-ring,
+  .plan-fill::after {
+    animation: none;
+  }
 }

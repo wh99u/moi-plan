@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { Income, Spend, Sub } from '../../lib/types';
-import { chartPaths, donutSegments, dueLabel, incomeVsSpent, monthTotals, monthTxs, monthWindow, txDays, unassigned, upcoming } from './logic';
+import { balanceSeries, blurCurve, dayWindow, donutSegments, dueLabel, exactMoney, incomeToday, incomeVsSpent, money, monthTxs, monthWindow, sampleCurve, txDays, unassigned, upcoming } from './logic';
 
 const sub = (id: string, next: string, extra: Partial<Sub> = {}): Sub => ({
   id,
@@ -73,41 +73,66 @@ describe('month feed', () => {
 });
 
 describe('chart', () => {
-  test('a window of months ends with the given one, across the new year', () => {
+  test('windows end with the given month or day, across a year', () => {
     expect(monthWindow('2026-02', 4)).toEqual(['2025-11', '2025-12', '2026-01', '2026-02']);
+    expect(dayWindow('2026-03-02', 3)).toEqual(['2026-02-28', '2026-03-01', '2026-03-02']);
   });
 
-  test('totals per month', () => {
-    const totals = monthTotals([inc('a', '2026-11-02', 100), inc('b', '2026-10-02', 7)], [out('c', '2026-11-03', 40), out('d', '2026-11-04', 2)], ['2026-10', '2026-11']);
-    expect(totals).toEqual([
-      { ym: '2026-10', income: 7, spent: 0 },
-      { ym: '2026-11', income: 100, spent: 42 },
-    ]);
+  test('the balance is worked back from today', () => {
+    const series = balanceSeries([inc('a', '2026-11-02', 100)], [out('b', '2026-11-03', 30)], 1000, ['2026-11-01', '2026-11-02', '2026-11-03'], '2026-11-03');
+    expect(series).toEqual([930, 1030, 1000]);
   });
 
-  test('the biggest value reaches the top, zero stays at the bottom', () => {
-    const p = chartPaths([0, 50, 100], 100, 300, 200, 40, 160);
-    expect(p.ys).toEqual([160, 100, 40]);
-    expect(p.xs).toEqual([50, 150, 250]);
+  test('deleted and future operations do not move the line', () => {
+    const series = balanceSeries([inc('a', '2026-11-02', 100, { deleted: true })], [out('b', '2026-11-20', 30)], 1000, ['2026-11-01', '2026-11-03'], '2026-11-03');
+    expect(series).toEqual([1000, 1000]);
   });
 
-  test('a floor stretches close values over the whole height', () => {
-    expect(chartPaths([60, 80, 100], 100, 300, 200, 40, 160, 60).ys).toEqual([160, 100, 40]);
+  test('the curve keeps its ends and every value', () => {
+    const s = sampleCurve([10, 20, 5], 5);
+    expect(s[0]).toBeCloseTo(10);
+    expect(s[2]).toBeCloseTo(20);
+    expect(s[4]).toBeCloseTo(5);
   });
 
-  test('the curve runs past both edges and never leaves the range', () => {
-    const p = chartPaths([100, 0, 100, 0], 100, 400, 200, 40, 160);
-    const nums = p.line.match(/-?\d+(\.\d+)?/g)!.map(Number);
-    const ys = nums.filter((_, i) => i % 2 === 1);
-    expect(Math.min(...ys)).toBe(40);
-    expect(Math.max(...ys)).toBe(160);
-    expect(nums[0]).toBeLessThan(0);
-    expect(nums[nums.length - 2]).toBeGreaterThan(400);
+  test('the curve never swings past the values', () => {
+    const s = sampleCurve([0, 100, 100, 0, 50], 200);
+    expect(Math.max(...s)).toBeLessThanOrEqual(100.0001);
+    expect(Math.min(...s)).toBeGreaterThanOrEqual(-0.0001);
   });
 
-  test('a new month changes only the numbers of the path, so it can morph', () => {
-    const shape = (s: string) => s.replace(/-?\d+(\.\d+)?/g, '#');
-    expect(shape(chartPaths([1, 2, 3], 3, 300, 200, 40, 160).line)).toBe(shape(chartPaths([9, 0, 4], 9, 300, 200, 40, 160).line));
+  test('softening turns a jump into a slope and leaves a flat line alone', () => {
+    const s = blurCurve([0, 0, 0, 0, 10, 10, 10, 10], 1);
+    expect(s[0]).toBe(0);
+    expect(s[7]).toBe(10);
+    expect(s[3]).toBeGreaterThan(0);
+    expect(s[4]).toBeLessThan(10);
+    expect(blurCurve([5, 5, 5], 2)).toEqual([5, 5, 5]);
+  });
+
+  test('a single value or none gives a flat line', () => {
+    expect(sampleCurve([7], 3)).toEqual([7, 7, 7]);
+    expect(sampleCurve([], 2)).toEqual([0, 0]);
+  });
+});
+
+describe('income today', () => {
+  const now = new Date(2026, 10, 3, 12);
+  test('against yesterday', () => {
+    expect(incomeToday([inc('a', '2026-11-03', 105), inc('b', '2026-11-02', 100)], now)).toMatchObject({ today: 105, yesterday: 100, pct: 5 });
+    expect(incomeToday([inc('b', '2026-11-02', 100)], now).pct).toBe(-100);
+  });
+  test('no percent when yesterday had nothing', () => {
+    expect(incomeToday([inc('a', '2026-11-03', 105)], now)).toMatchObject({ today: 105, pct: null });
+    expect(incomeToday([], now)).toMatchObject({ today: 0, pct: null });
+  });
+});
+
+describe('amounts', () => {
+  test('no kopecks in general, exact on a receipt', () => {
+    expect(money(1248.4)).toBe('1\u00a0248\u00a0₽');
+    expect(exactMoney(89.99)).toBe('89,99\u00a0₽');
+    expect(exactMoney(489)).toBe('489\u00a0₽');
   });
 });
 
